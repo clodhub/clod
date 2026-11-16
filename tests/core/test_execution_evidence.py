@@ -71,11 +71,11 @@ class ExecutionEvidenceTests(unittest.TestCase):
                          **{k: self.binding[k] for k in ("lockDigest", "assemblyDigest", "suiteSetDigest")},
                          "startedAt": 1001, "completedAt": 1004, "suites": []}
         results = []
-        for suite in self.binding["suites"]:
+        for suite in sorted(self.binding["suites"], key=lambda item: item["id"] != "native"):
             is_native = suite["id"] == "native"
             started = authorized or not is_native
             assertions = [{"id": key, "passed": started, "actual": (0 if key == "tests-passed" else 1) if started else None}
-                          for key in suite["execution"]["assertions"]]
+                          for key in suite.get("execution", local_execution())["assertions"]]
             prerequisites = [{"id": "external:windows-host", "status": "passed" if started else "blocked", "reason": "" if started else "context-missing",
                               "observations": {"platform": "win32", "architecture": "x64", "osVersion": "10.0", "containment": "job-object"} if started else None}] if windows and is_native else []
             if android and is_native:
@@ -90,7 +90,10 @@ class ExecutionEvidenceTests(unittest.TestCase):
                 record["resources"] = [{"id": name, "digest": "a" * 64 if started else None} for name in ("androidJavaHome", "androidSdk")]
             self.evidence["suites"].append(record)
             results.append({"package": self.ref["digest"], "id": suite["id"], "scope": suite["scope"], "status": "passed" if started else "blocked",
-                            "exitCode": 0 if started else None, "seconds": 1, "reason": "" if started else "context-missing", "logDigest": digest(b"")})
+                             "exitCode": 0 if started else None, "seconds": 1, "reason": "" if started else "context-missing", "logDigest": digest(b"")})
+            if "class" in suite:
+                from aepm.foundations import class_result_evidence
+                results[-1]["classEvidence"] = class_result_evidence(suite, self.source, 1002, 1003)
         self.report = {"format": 2, "context": "review", **{k: self.binding[k] for k in ("lockDigest", "assemblyDigest", "packages", "suiteSetDigest")},
                        "suites": results, "summary": {"required-local": "passed", "platform": "passed" if authorized else "blocked", "deployed": "not-applicable"},
                        "execution": {"runId": self.run_id, "mode": "local", "simulationKind": None, "contextDigest": self.context_digest,

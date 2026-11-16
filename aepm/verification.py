@@ -20,7 +20,9 @@ def declarations(packages, manifests, context):
     result = []
     seen = set()
     for ref in packages:
-        for suite in manifests[ref["digest"]]["verification"]:
+        from .foundations import class_suites
+        manifest = manifests[ref["digest"]]
+        for suite in [*manifest["verification"], *class_suites(manifest)]:
             if context == "review" and suite["root"] != "package":
                 continue
             key = (ref["digest"], suite["id"])
@@ -75,6 +77,8 @@ def retained_manifests(root, policy):
         source = released["annotations"]["sourceTreeDigest"]
         if source_tree_digest(manifest, payloads) != source or identity["sourceTreeDigest"] != source:
             fail("retained-source", "packages")
+        from .foundations import validate_package_foundations
+        validate_package_foundations(manifest, payloads)
         files = {item["path"] for item in snapshot(package_root) if item["kind"] == "file"}
         if files != set(payloads) | {"component.json"}:
             fail("retained-membership", "packages")
@@ -168,6 +172,12 @@ def execute_suite(suite, source, allow_network, logs, *, tool_selection=None, ad
             if environment is None:
                 reason = "tool-unavailable"
             if environment is not None:
+                if "class" in suite:
+                    from .foundations import module_sources
+                    manifest = load(root / "component.json")
+                    environment.update(AEPM_CANDIDATE_ROOT=str(root), AEPM_CANDIDATE_MANIFEST=str(root / "component.json"),
+                                       AEPM_CANDIDATE_DIGEST=suite["package"], AEPM_CLASS_DIGEST=suite["class"]["digest"],
+                                       AEPM_MODULE_MAP=canonical(module_sources(manifest, root)).decode())
                 for name, expected_version in suite["tools"].items():
                     version_flag = "-version" if name in ("java", "javac", "swift", "xcodebuild", "kotlinc") else "--version"
                     if tool_selection is not None:
@@ -259,6 +269,7 @@ def make_report(lock, assembly_digest, manifests, roots, application_root, polic
                           **execution_options) if use_context else None
     results, records = [], []
     for suite in suites:
+        suite_started = clock()
         source = roots[suite["package"]] if suite["root"] == "package" else application_root
         if "execution" in suite:
             result, record = execute(suite, source, allow_network, logs, execution, tool_selection=tool_selection, **adoption)
@@ -273,6 +284,9 @@ def make_report(lock, assembly_digest, manifests, roots, application_root, polic
             for prerequisite in record["prerequisites"]:
                 prerequisite["reason"] = "unsupported-prerequisite"
         results.append(result)
+        if "class" in suite:
+            from .foundations import class_result_evidence
+            result["classEvidence"] = class_result_evidence(suite, source, suite_started, clock())
         records.append(record)
     report = {"format": 1, "context": context, "lockDigest": digest(canonical(lock)), "assemblyDigest": assembly_digest,
             "packages": package_records(lock), "suiteSetDigest": digest(canonical(suites)), "suites": results,

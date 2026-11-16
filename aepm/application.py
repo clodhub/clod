@@ -221,10 +221,39 @@ def requirements(definition):
     return [definition["recipe"], *[{key: item[key] for key in ("name", "version")} for item in definition["components"]]]
 
 
+def validate_selection(definition, manifests, roots=None, *, payloads=None):
+    from .foundations import selected_targets, validate_graph
+    from .model import loads
+    from .recipe import Package, fit
+    by_name = {manifest["identity"]["name"]: (key, manifest) for key, manifest in manifests.items()}
+    recipe_key, recipe_manifest = by_name[definition["recipe"]["name"]]
+    targets = selected_targets(recipe_manifest, definition.get("answers", {}))
+    validate_graph(list(manifests.values()), targets)
+
+    def package(key, manifest):
+        reader = payloads[key].__getitem__ if payloads is not None else lambda path: rooted(roots[key], path).read_bytes()
+        return Package(manifest, reader)
+
+    authority = package(recipe_key, recipe_manifest)
+    raw = authority.file("recipe.json")
+    if raw is None:
+        return
+    recipe = loads(raw, "recipe.json")
+    slots = {slot["id"]: slot for slot in recipe["components"]}
+    for item in definition["components"]:
+        if item["id"] not in slots:
+            fail("unknown-slot", item["id"])
+        key, manifest = by_name[item["name"]]
+        reasons = fit(slots[item["id"]]["class"], package(key, manifest), authority, targets)
+        if reasons:
+            fail("unfit", item["id"] + ":" + ",".join(reasons))
+
+
 def validate_retained_assembly(root, assembly, manifests):
     definition = validate_definition(load(Path(root) / ".aepm/definition.json"))
     if digest(canonical(definition)) != assembly["lock"]["definitionDigest"]:
         fail("definition-digest", "definition")
+    validate_selection(definition, manifests, {key: Path(root) / ".aepm/packages" / key for key in manifests})
     expected_files, expected_configuration = [], {}
     present = present_components(definition)
     generated_definitions, generated_instances = {}, {}
@@ -277,13 +306,15 @@ def validate_retained_assembly(root, assembly, manifests):
 
 @guarded
 def assemble(definition: Definition, lock: Lock, store: Path, destination: Path, policy: Path) -> Assembly:
-    from .bundle import extract, resolve
+    from .bundle import extract, resolve, read_package
 
     definition = validate_definition(definition)
     lock = validate_lock(lock)
     expected = resolve(requirements(definition), Path(store) / "catalogue.json", definition["id"], digest(canonical(definition)))
     if lock != expected:
         fail("lock-definition", "lock")
+    documents = {ref["digest"]: read_package({key: ref[key] for key in ("name", "version", "digest")}, Path(store)) for ref in lock["packages"]}
+    validate_selection(definition, {key: item[0] for key, item in documents.items()}, payloads={key: item[1] for key, item in documents.items()})
     destination = Path(destination).absolute()
     if destination.exists() or destination.is_symlink() or not destination.parent.is_dir() or destination.parent.is_symlink():
         fail("target-exists", "target")

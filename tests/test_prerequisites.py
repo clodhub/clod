@@ -53,8 +53,9 @@ class PrerequisiteTests(unittest.TestCase):
         refs = [{"digest": "b" * 64}, {"digest": "a" * 64}]
         manifests = {ref["digest"]: deepcopy(self.manifest) for ref in refs}
         records = declarations(refs, manifests, "review")
+        from aepm.foundations import class_suites
         expected = sorted([{**suite, "package": ref["digest"]} for ref in refs
-                           for suite in self.manifest["verification"]], key=lambda item: (item["package"], item["id"]))
+                           for suite in [*self.manifest["verification"], *class_suites(self.manifest)]], key=lambda item: (item["package"], item["id"]))
         self.assertEqual(records, expected)
         changed = deepcopy(expected)
         changed[0]["requirements"] = ["external:changed"]

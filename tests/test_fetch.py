@@ -98,7 +98,7 @@ class FetchTests(unittest.TestCase):
         manifest["kind"] = "recipe"
         manifest["artefacts"][0]["destination"] = "run.sh"
         write(recipe_root / "recipe.json", {"name": "ourapps-ae/game", "version": "0.1.0", "components": [
-            {"id": "sample", "class": {"provides": [], "requires": [], "configuration": {}},
+            {"id": "sample", "class": manifest["classes"][0]["reference"],
              "preferred": {"name": "ourapps-ae/sample", "version": "0.1.0"}, "configuration": {}, "includedWhen": None}],
             "jobs": [{"id": "job", "slot": "sample", "candidates": [
                 {"component": "ourapps-ae/sample", "profile": "any"},
@@ -170,7 +170,7 @@ class FetchInstallTests(unittest.TestCase):
         publish_release(source, ref, root / "identities/release.pem")
         report = review_package(ref, source, policy, True)
         self.assertEqual((report["format"], report["summary"]["required-local"]), (2, "passed"))
-        publish_review(source, ref, report, root / "identities/guardian.pem")
+        publish_review(source, ref, report, root / "identities/guardian.pem", policy=policy)
         paths = evidence_paths(report)
         self.assertIn(f"execution-evidence/{report['execution']['evidenceDigest']}.json", paths)
 

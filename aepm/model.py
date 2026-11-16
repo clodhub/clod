@@ -57,6 +57,12 @@ class Component(TypedDict):
     infrastructure: dict[str, Any]
     verification: list[dict[str, Any]]
     upgrade: dict[str, str]
+    platforms: list[str]
+    classes: list[dict[str, Any]]
+    implements: list[PackageRef]
+    upstream: list[dict[str, Any]]
+    compatibility: dict[str, Any]
+    maintenance: dict[str, Any]
 
 
 class Definition(TypedDict):
@@ -417,7 +423,8 @@ def slot_condition(value: object, path: str) -> object:
 
 @guarded
 def validate_component(value: object) -> Component:
-    c = fields(value, "format kind identity facilities documents collect files artefacts dependencies provides requires visual capabilities infrastructure verification upgrade", "component")
+    from .foundations import FOUNDATION_FIELDS, validate_foundations
+    c = fields(value, "format kind identity facilities documents collect files artefacts dependencies provides requires visual capabilities infrastructure verification upgrade " + FOUNDATION_FIELDS, "component")
     if type(c["format"]) is not int or c["format"] not in (1, 2):
         fail("invalid-format", "component")
     choice(c["kind"], ("component", "recipe"), "kind")
@@ -497,6 +504,7 @@ def validate_component(value: object) -> Component:
             text(port["type"], key)
             version(port["version"], key)
             safe_path(port["path"], key)
+            required_paths.append(port["path"])
             if "optional" in port:
                 boolean(port["optional"], key + ".optional")
         unique([p["id"] for p in c[key]], key)
@@ -585,6 +593,7 @@ def validate_component(value: object) -> Component:
     upgrade = fields(c["upgrade"], "policy migration", "upgrade")
     choice(upgrade["policy"], ("patch", "minor", "none"), "upgrade.policy")
     choice(upgrade["migration"], ("files-only",), "upgrade.migration")
+    validate_foundations(c)
     canonical(c)
     return cast(Component, c)
 

@@ -65,7 +65,7 @@ def prepare(out):
         report = review_package(ref, store, out / "policy.json", True)
         if report["summary"]["required-local"] != "passed":
             raise AssertionError(report)
-        publish_review(store, ref, report, root / "private-identities/guardian.pem")
+        publish_review(store, ref, report, root / "private-identities/guardian.pem", policy=out / "policy.json")
         verify_package(ref, store, out / "policy.json")
         definition = {"format": 1, "id": "windows-fixture", "title": "Windows Fixture",
                       "recipe": {"name": ref["name"], "version": ref["version"]}, "components": [], "configuration": {},

@@ -58,7 +58,7 @@ class ContextUpdateTests(unittest.TestCase):
             for ref in refs:
                 report = review_package(ref, store, policy_path, True)
                 self.assertEqual(report["summary"]["required-local"], "passed", report)
-                publish_review(store, ref, report, root / "keys/guardian.pem")
+                publish_review(store, ref, report, root / "keys/guardian.pem", policy=policy_path)
                 verify_package(ref, store, policy_path)
             definition = {"format": 1, "id": "context-app", "title": "Context App", "recipe": {"name": "ourapps-ae/recipe", "version": "0.1.0"},
                           "components": [{"id": "sample", "name": "ourapps-ae/sample", "version": "0.1.0", "configuration": {}}],

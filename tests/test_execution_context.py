@@ -190,8 +190,10 @@ class ExecutionContextTests(unittest.TestCase):
         self.authorize()
         with patch("aepm.contextual.shutil.rmtree", refuse_profile):
             report = self.run_review()
-        self.assertTrue(all(item["status"] == "failed" and item["reason"] == "cleanup-failed" for item in report["suites"]))
-        for suite in report["suites"]:
+        contextual = [item for item in report["suites"] if "classEvidence" not in item]
+        self.assertTrue(all(item["status"] == "failed" and item["reason"] == "cleanup-failed" for item in contextual))
+        self.assertTrue(all(item["status"] == "passed" for item in report["suites"] if "classEvidence" in item))
+        for suite in contextual:
             events = load(self.store / "logs" / (suite["logDigest"] + ".json"))
             retained = [Path(event["path"]) for event in events if event["step"] == "retained-private-root"]
             self.assertEqual(len(retained), 1)

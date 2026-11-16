@@ -119,7 +119,7 @@ class RecipeUpdateContextTests(unittest.TestCase):
                         self.assertEqual(suite["kind"], "simulation")
                         self.assertTrue(all(assertion["passed"] for assertion in suite["assertions"]))
                 statements = store / "statements" / ref["digest"]
-                publish_review(store, ref, report, root / "keys/guardian.pem")
+                publish_review(store, ref, report, root / "keys/guardian.pem", policy=policy_path)
                 verify_package(ref, store, policy_path)
                 retained_context = store / "contexts" / (report["execution"]["contextDigest"] + ".json")
                 original = retained_context.read_bytes()

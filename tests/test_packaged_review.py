@@ -34,6 +34,7 @@ class PackagedReviewTests(unittest.TestCase):
             if evidence:
                 write(Path(evidence), report)
             self.assertEqual(report["summary"]["required-local"], "passed", report)
-            self.assertEqual(len(report["suites"]), len([suite for suite in manifest["verification"] if suite["root"] == "package"]))
-            publish_review(store, ref, report, root / "identities/guardian.pem")
+            from aepm.foundations import class_suites
+            self.assertEqual(len(report["suites"]), len([suite for suite in manifest["verification"] if suite["root"] == "package"]) + len(class_suites(manifest)))
+            publish_review(store, ref, report, root / "identities/guardian.pem", policy=policy_path)
             verify_package(ref, store, policy_path)

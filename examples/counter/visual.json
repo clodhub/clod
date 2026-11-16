@@ -1,0 +1,1 @@
+{"id":"ourapps-ae.counter","name":"Counter","kind":"component","status":"example","package":"ourapps-ae/counter","version":"1.0.0","ports":[{"id":"counter","name":"Counter","direction":"output","kind":"interface","type":"counter","version":"1.0.0"}],"settings":[]}

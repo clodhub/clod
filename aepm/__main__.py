@@ -110,12 +110,15 @@ def dispatch(args):
                      origin=args.origin)
     if command == "alternatives":
         from .fetch import fetch, providers
-        from .recipe import World, slot_fit
+        from .recipe import World, slot_fit, _class_payloads
         world = World.from_store(*identity(args.recipe), args.store)
         if args.slot not in world.slots:
             fail("unknown-slot", args.slot)
         spec = world.slots[args.slot]
-        found = providers([item["type"] for item in spec["class"]["provides"]], origin=args.origin)
+        from .foundations import class_descriptor
+        authority = world.authority
+        descriptor = class_descriptor(authority.manifest, _class_payloads(authority, spec["class"]), spec["class"])
+        found = providers([item["type"] for item in descriptor["provides"]], origin=args.origin)
         fetch(args.store, found, origin=args.origin)
         result = []
         for package_name, package_version in found:

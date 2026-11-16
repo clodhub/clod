@@ -113,7 +113,8 @@ class SuiteSelectionTests(unittest.TestCase):
             report = review_package(self.ref, self.store, self.policy, True, execution_context=self.context,
                                     authorization=self.authorization, execution_state=self.state)
         results = {suite["id"]: suite for suite in report["suites"]}
-        self.assertEqual(set(results), {"unit", "build", "runtime", "provider"})
+        self.assertEqual({key for key in results if not key.startswith("class:")}, {"unit", "build", "runtime", "provider"})
+        self.assertEqual(len([item for item in results.values() if "classEvidence" in item and item["status"] == "passed"]), 1)
         self.assertEqual(results["build"]["status"], "passed")
         self.assertEqual((results["runtime"]["status"], results["runtime"]["reason"]), ("blocked", "authorization-denied"))
         binding = review_bindings(self.ref, self.store)

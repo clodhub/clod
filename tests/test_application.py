@@ -75,7 +75,7 @@ class ApplicationTests(unittest.TestCase):
                 if report[field] != binding[field]:
                     raise AssertionError(field)
             statements = cls.store / "statements" / ref["digest"]
-            publish_review(cls.store, ref, report, cls.identities / "guardian.pem")
+            publish_review(cls.store, ref, report, cls.identities / "guardian.pem", policy=cls.policy)
             verify_package(ref, cls.store, cls.policy)
         cls.definition = {"format": 1, "id": "sample-app", "title": "Sample", "recipe": {"name": "ourapps-ae/recipe", "version": "0.1.0"},
                           "components": [{"id": "sample", "name": "ourapps-ae/sample", "version": "0.1.0", "configuration": {}}],
@@ -122,7 +122,7 @@ class ApplicationTests(unittest.TestCase):
         self.policy = self.root / "policy.json"
         write(self.policy, policy)
         report = review_package(ref, self.store, self.policy, True)
-        publish_review(self.store, ref, report, self.identities / "guardian.pem")
+        publish_review(self.store, ref, report, self.identities / "guardian.pem", policy=self.policy)
         self.definition["recipe"]["version"] = "0.1.1"
         return ref
 
@@ -138,7 +138,7 @@ class ApplicationTests(unittest.TestCase):
         with patch.dict(os.environ, {"AWS_SECRET_ACCESS_KEY": "DO-NOT-INHERIT"}):
             report = verify_application(self.app, self.policy, True)
         self.assertEqual(report["summary"], {"required-local": "passed", "platform": "blocked", "deployed": "not-applicable"})
-        self.assertEqual(len(report["suites"]), 5)
+        self.assertEqual(len(report["suites"]), 7)
         self.assertEqual(snapshot(self.app), snapshot(self.base / "baseline"))
         output = export_design(self.assembly, self.root / "diagrams")
         design = load(output["design"])

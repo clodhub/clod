@@ -309,14 +309,18 @@ def publish_release(store: Path, ref: PackageRef, private_key: Path) -> dict:
 
 
 @guarded
-def publish_review(store: Path, ref: PackageRef, report: dict, private_key: Path) -> dict:
+def publish_review(store: Path, ref: PackageRef, report: dict, private_key: Path, *, policy: Path) -> dict:
     """Sign the guardian's verification summary for a reviewed archive and its complete review report."""
     from .bundle import read_package
     from .io import write
     component, _ = read_package(ref, Path(store))
+    validate_report_evidence(report, review_bindings(ref, Path(store)), "review", Path(store), Path(policy))
+    if len(canonical(report)) > 1024 * 1024:
+        fail("metadata-limit", "report")
     scopes = sorted({suite["scope"] for suite in report["suites"]})
     dependencies = len([item for item in report["packages"] if item["digest"] != ref["digest"]])
     statement = review_statement(ref, component["kind"], digest(canonical(report)), scopes, dependencies)
+    write(Path(store) / "reports" / (digest(canonical(report)) + ".json"), report)
     write(Path(store) / "statements" / ref["digest"] / "guardian.dsse.json", sign(statement, "guardian", Path(private_key)))
     return statement
 
@@ -371,11 +375,12 @@ def review_bindings(ref: PackageRef, store: Path) -> dict:
     refs = [cast(PackageRef, {k: p[k] for k in ("name", "version", "digest")}) for p in lock["packages"]]
     packages = [{**p, "dependencies": sorted(d["digest"] for d in locked["dependencies"])}
                 for p, locked in zip(refs, lock["packages"])]
-    suites = []
+    manifests = {}
     for p in refs:
         manifest, _ = read_package(p, store)
-        suites.extend({"package": p["digest"], **s} for s in manifest["verification"] if s["root"] == "package")
-    suites.sort(key=lambda s: (s["package"], s["id"]))
+        manifests[p["digest"]] = manifest
+    from .verification import declarations
+    suites = declarations(refs, manifests, "review")
     return {"lock": lock, "packages": packages, "suites": suites,
             "lockDigest": digest(canonical(lock)),
             "assemblyDigest": digest(canonical({"packages": refs})),
@@ -419,6 +424,8 @@ def validate_report_evidence(report: dict, binding: dict, context: str,
                              evidence_root: Path | None, policy: Path | None, *,
                              adoption: bool = False, now: int | None = None) -> dict:
     """Validate retained signed evidence without executing package code."""
+    if len(canonical(report)) > 1024 * 1024:
+        fail("metadata-limit", "report")
     fields(binding, "lock packages suites lockDigest assemblyDigest suiteSetDigest", "binding")
     lock = validate_lock(binding["lock"])
     packages = [{**{k: p[k] for k in ("name", "version", "digest")},
@@ -440,7 +447,6 @@ def validate_report_evidence(report: dict, binding: dict, context: str,
     if modern:
         if evidence_root is None or policy is None:
             fail("evidence-required", "report")
-        execution_document(report, "report")
     for key in ("lockDigest", "assemblyDigest", "packages", "suiteSetDigest"):
         if report[key] != binding[key]:
             fail("report-binding", "report." + key)
@@ -448,13 +454,15 @@ def validate_report_evidence(report: dict, binding: dict, context: str,
     seen = set()
     statuses = {scope: [] for scope in SCOPES}
     for suite in array(report["suites"], "report.suites"):
-        fields(suite, "package id scope status exitCode seconds reason logDigest", "report.suites")
+        fields(suite, "package id scope status exitCode seconds reason logDigest", "report.suites", "classEvidence")
         text(suite["package"], "report.suites.package")
         text(suite["id"], "report.suites.id")
         key = (suite["package"], suite["id"])
         if key in seen or key not in expected or suite["scope"] != expected[key]["scope"]:
             fail("suite-coverage", "report.suites")
         seen.add(key)
+        from .foundations import validate_class_result_evidence
+        validate_class_result_evidence(suite, expected[key])
         choice(suite["status"], ("passed", "failed", "blocked"), "report.suites.status")
         if suite["exitCode"] is not None:
             integer(suite["exitCode"], "report.suites.exitCode")
@@ -468,6 +476,15 @@ def validate_report_evidence(report: dict, binding: dict, context: str,
         statuses[suite["scope"]].append(suite["status"])
     if seen != expected.keys():
         fail("suite-coverage", "report.suites")
+    if modern:
+        bounded_suites = []
+        for suite in report["suites"]:
+            if "classEvidence" in suite:
+                evidence = suite["classEvidence"]
+                suite = {**suite, "classEvidence": {**evidence, "files": [
+                    {**item, "content": item["digest"]} for item in evidence["files"]]}}
+            bounded_suites.append(suite)
+        execution_document({**report, "suites": bounded_suites}, "report")
     summary = {scope: ("not-applicable" if not values else "failed" if "failed" in values else
                        "blocked" if "blocked" in values else "passed") for scope, values in statuses.items()}
     if report["summary"] != summary or summary["required-local"] != "passed":

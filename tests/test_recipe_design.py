@@ -1,15 +1,17 @@
 import contextlib
+import copy
 import io
 import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from aepm.__main__ import main
 from aepm.application import validate_definition
 from aepm.bundle import pack
 from aepm.io import load, write
-from aepm.model import canonical
+from aepm.model import canonical, digest
 from aepm.recipe import CelError, World, evaluate, evaluate_condition, fit, parse_condition, question_kinds, questions, slot_fit
 from tests.core.test_core import fixture
 
@@ -22,6 +24,9 @@ def component(root, name, provides=(), requires=(), collect=(), profiles=None, d
     manifest["provides"] = [{"id": port, "type": "ae/" + port, "version": "1.0.0", "path": f"{port}.json"} for port in provides]
     manifest["requires"] = [{"id": port, "type": "ae/" + port, "version": "1.0.0", "path": f"{port}.json"} for port in requires]
     manifest["collect"] = list(collect)
+    key = "deck" if name.startswith("deck") else name
+    if key in SLOT_CLASSES:
+        attach_class(root, manifest, SLOT_CLASSES[key])
     write(root / "suitability.json", {"format": 1, "jobs": [name], "profiles": profiles or [
         {"id": "any", "load": {}, "cost": "none", "regions": ["any"], "compliance": []}], "notes": ""})
     manifest["files"].append({"path": "suitability.json", "executable": False})
@@ -31,13 +36,37 @@ def component(root, name, provides=(), requires=(), collect=(), profiles=None, d
 
 
 LABEL = {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9 -]{0,63}$"}
+SLOT_CLASSES = {}
+
+
+def attach_class(root, manifest, entry):
+    manifest["classes"] = [copy.deepcopy(entry)]
+    manifest["implements"] = [copy.deepcopy(entry["reference"])]
+    listed = {item["path"] for item in manifest["files"]}
+    for item in entry["descriptor"]["inventory"]:
+        if item["path"] == "class-check.py":
+            continue
+        path = root / item["path"]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"{}")
+        if item["path"] not in listed:
+            manifest["files"].append({"path": item["path"], "executable": False})
 
 
 def slot(identifier, name, provides=(), properties=None, required=(), includedWhen=None):
+    check = b"import json, os\nfrom pathlib import Path\nm = json.loads(Path(os.environ['AEPM_CANDIDATE_MANIFEST']).read_text())\nassert m['identity']['name'].startswith('ourapps-ae/')\nassert all(Path(p).is_file() for p in json.loads(os.environ['AEPM_MODULE_MAP']).values())\n"
+    descriptor = {"format": 1, "name": "ourapps-ae/" + identifier + "-class", "version": "1.0.0",
+                  "provides": [{"type": "ae/" + port, "version": "1.0.0", "path": f"classes/{identifier}/{port}.json", "modules": {"web": ["run.sh"]}} for port in provides],
+                  "requires": [], "settings": {"type": "object", "properties": properties or {}, "required": list(required), "additionalProperties": False},
+                  "inventory": [{"path": "class-check.py", "digest": digest(check)},
+                                *[{"path": f"classes/{identifier}/{port}.json", "digest": digest(b"{}")} for port in provides]],
+                  "verification": [{"id": "behaviour", "root": "package", "argv": ["python3", "class-check.py"], "cwd": ".", "prepare": [],
+                                    "tools": {"python3": "3"}, "fixtures": ["class-check.py"], "locks": [], "network": False,
+                                    "timeoutSeconds": 10, "expectedExit": 0, "scope": "required-local", "requirements": []}]}
+    reference = {"name": descriptor["name"], "version": descriptor["version"], "digest": digest(canonical(descriptor))}
+    SLOT_CLASSES[identifier] = {"reference": reference, "descriptor": descriptor}
     return {"id": identifier,
-            "class": {"provides": [{"type": "ae/" + port, "version": "1.0.0"} for port in provides], "requires": [],
-                      "configuration": {"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",
-                                        "properties": properties or {}, "required": list(required), "additionalProperties": True}},
+            "class": reference,
             "preferred": {"name": name, "version": "0.1.0"}, "configuration": {}, "includedWhen": includedWhen}
 
 
@@ -96,8 +125,20 @@ class RecipeDesignTests(unittest.TestCase):
         for name in ("deck", "video", "host", "deck2", "deck3", "deck4"):
             pack(cls.root / name, cls.store)
         recipe = component(cls.root / "game", "game", requires=["deck"])
+        recipe["platforms"] = ["web", "ios"]
         recipe["kind"] = "recipe"
         recipe["artefacts"][0]["destination"] = "run.sh"
+        recipe["classes"] = []
+        recipe["implements"] = []
+        for entry in SLOT_CLASSES.values():
+            listed = {item["path"] for item in recipe["files"]}
+            for item in entry["descriptor"]["inventory"]:
+                if item["path"] not in listed:
+                    path = cls.root / "game" / item["path"]
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(b"{}")
+                    recipe["files"].append({"path": item["path"], "executable": False})
+            recipe["classes"].append(copy.deepcopy(entry))
         write(cls.root / "game" / "recipe.json", RECIPE)
         recipe["files"].append({"path": "recipe.json", "executable": False})
         recipe["files"].sort(key=lambda item: item["path"])
@@ -150,7 +191,13 @@ class RecipeDesignTests(unittest.TestCase):
         self.assertEqual(evaluate(world, {"server": "nobody"})["errors"], [{"code": "uncovered", "path": "server"}])
         with_video = evaluate(world, {"video": True, "videoKey": "keys/video"})
         self.assertEqual(next(c for c in with_video["design"]["components"] if c["id"] == "video")["configuration"],
-                         {"key": {"secretRef": "keys/video"}})
+                          {"key": {"secretRef": "keys/video"}})
+
+    def test_empty_or_unsupported_targets_are_error_values(self):
+        world = self.world()
+        self.assertEqual(evaluate(world, {"targets": []}), {"ok": False, "errors": [{"code": "invalid-answer", "path": "answers.targets"}]})
+        world.application["platforms"] = ["web"]
+        self.assertEqual(evaluate(world, {"targets": ["ios"]}), {"ok": False, "errors": [{"code": "invalid-answer", "path": "answers.targets"}]})
 
     def test_fit_rule(self):
         world = self.world()
@@ -158,19 +205,17 @@ class RecipeDesignTests(unittest.TestCase):
         self.assertEqual(slot_fit(world, "deck", packages["deck"]), [])
         alternative = self.world(deck="deck2")
         self.assertEqual(slot_fit(alternative, "deck", alternative.filling["deck"]), [])
-        for name, reasons in (("deck3", ["document:ae/deck@1.0.0"]),
+        for name, reasons in (("deck3", []),
                               ("deck4", ["requires:ae/random-source@1.0.0", "setting-type:targets", "unset-setting:size"]),
-                              ("host", ["provides:ae/deck@1.0.0", "setting:targets"])):
+                              ("host", ["class-unavailable:ourapps-ae/deck-class"])):
             other = self.world(deck=name)
             with self.subTest(name=name):
                 self.assertEqual(slot_fit(other, "deck", other.filling["deck"]), reasons)
 
     def test_entry_modules_are_part_of_the_fit(self):
-        document = json.dumps({"x-ourapps-modules": {"web": "web/index.ts", "apple": "apple/Sources"}})
         world = self.world()
         preferred = world.filling["deck"]
         manifest = json.loads(json.dumps(preferred.manifest))
-        bytes_for = {"deck.json": document.encode()}
 
         class Fake:
             def __init__(self, destinations):
@@ -178,11 +223,11 @@ class RecipeDesignTests(unittest.TestCase):
                 self.name, self.version = "ourapps-ae/deck", "0.1.0"
 
             def file(self, path):
-                return bytes_for.get(path)
+                return preferred.file(path)
 
-        self.assertEqual(fit(RECIPE["components"][0]["class"], Fake(["web/index.ts", "apple/Sources/Deck.swift"]), Fake([])), [])
+        self.assertEqual(fit(RECIPE["components"][0]["class"], Fake(["run.sh"]), world.authority), [])
         self.assertEqual(fit(RECIPE["components"][0]["class"], Fake(["web/deck.ts"]), Fake([])),
-                         ["module:web:web/index.ts", "module:apple:apple/Sources"])
+                          ["module:web:run.sh"])
 
     def test_substitution(self):
         result = evaluate(self.world(deck="deck2"), {})
@@ -190,9 +235,53 @@ class RecipeDesignTests(unittest.TestCase):
         self.assertEqual(result["design"]["components"][0], {"id": "deck", "name": "ourapps-ae/deck2", "version": "0.1.0",
                                                              "configuration": {"targets": "web"}})
         self.assertEqual(result["design"]["selections"]["deck"], {"component": "ourapps-ae/deck2", "version": "0.1.0", "reason": "substituted"})
-        refused = evaluate(self.world(deck="deck3"), {})
-        self.assertEqual(refused["errors"], [{"code": "unfit", "path": "deck:document:ae/deck@1.0.0"}])
+        self.assertTrue(evaluate(self.world(deck="deck3"), {})["ok"])
         self.assertEqual(evaluate(self.world(nowhere="deck2"), {})["errors"], [{"code": "unknown-slot", "path": "nowhere"}])
+
+    def test_offline_substitution_without_preferred_archive(self):
+        from aepm.bundle import add_archive
+        with tempfile.TemporaryDirectory() as temporary:
+            store = Path(temporary).resolve() / "store"
+            entries = load(self.store / "catalogue.json")["entries"]
+            for entry in entries:
+                if entry["name"] in ("ourapps-ae/game", "ourapps-ae/deck2", "ourapps-ae/host", "ourapps-ae/video"):
+                    add_archive(store, entry, (self.store / "objects" / (entry["digest"] + ".tar")).read_bytes())
+            world = World.from_store("ourapps-ae/game", "0.1.0", store, {"deck": ("ourapps-ae/deck2", "0.1.0")})
+            result = evaluate(world, {})
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["design"]["components"][0]["name"], "ourapps-ae/deck2")
+
+    def test_design_rejects_selected_graph_conflicts(self):
+        world = self.world()
+        world.application["compatibility"]["frameworks"] = {"web-ui": {"name": "vue", "range": ">=3.0.0 <4.0.0"}}
+        world.filling["deck"].manifest["compatibility"]["frameworks"] = {"web-ui": {"name": "react", "range": ">=19.0.0 <20.0.0"}}
+        self.assertIn("framework-conflict:web-ui", fit(world.slots["deck"]["class"], world.filling["deck"], world.authority, ["web"]))
+        result = evaluate(world, {})
+        self.assertFalse(result["ok"])
+        self.assertIn({"code": "framework-conflict", "path": "web-ui"}, result["errors"])
+
+    def test_evaluation_validates_the_selected_graph_once(self):
+        from aepm.foundations import validate_graph
+        world = self.world()
+        with patch("aepm.foundations.validate_graph", wraps=validate_graph) as checked:
+            result = evaluate(world, {})
+        self.assertTrue(result["ok"], result)
+        checked.assert_called_once()
+        manifests, targets = checked.call_args.args
+        self.assertEqual({item["identity"]["name"] for item in manifests}, {"ourapps-ae/game", "ourapps-ae/deck", "ourapps-ae/host"})
+        self.assertEqual(targets, ["web"])
+
+    def test_evaluation_rechecks_class_bytes_on_every_call(self):
+        world = self.world()
+        self.assertTrue(evaluate(world, {})["ok"])
+        original = world.authority.file
+        path = SLOT_CLASSES["deck"]["descriptor"]["inventory"][-1]["path"]
+        world.authority.file = lambda name: b"tampered" if name == path else original(name)
+        result = evaluate(world, {})
+        self.assertFalse(result["ok"])
+        self.assertIn({"code": "unfit", "path": "deck:class-file-digest:ourapps-ae/deck-class"}, result["errors"])
+        world.authority.file = original
+        self.assertTrue(evaluate(world, {})["ok"])
 
     def test_alternatives_from_the_catalogue(self):
         import http.server
@@ -217,7 +306,7 @@ class RecipeDesignTests(unittest.TestCase):
         self.assertEqual(value["result"], [
             {"name": "ourapps-ae/deck", "version": "0.1.0", "fits": True, "reasons": []},
             {"name": "ourapps-ae/deck2", "version": "0.1.0", "fits": True, "reasons": []},
-            {"name": "ourapps-ae/deck3", "version": "0.1.0", "fits": False, "reasons": ["document:ae/deck@1.0.0"]}])
+            {"name": "ourapps-ae/deck3", "version": "0.1.0", "fits": True, "reasons": []}])
         code, value = self.command("alternatives", "game@0.1.0", "nowhere", "--store", self.store, "--from", origin)
         self.assertEqual((code, value["error"]["code"]), (1, "unknown-slot"))
 

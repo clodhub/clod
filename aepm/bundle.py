@@ -173,6 +173,8 @@ def pack(source: Path, store: Path) -> PackageRef:
             fail("archive-limit", "files")
         payloads[p] = data
     component["identity"]["sourceTreeDigest"] = source_tree_digest(component, payloads)
+    from .foundations import validate_package_foundations
+    validate_package_foundations(component, payloads)
     payloads["component.json"] = canonical(component)
     if len(payloads["component.json"]) > 1024 * 1024:
         fail("metadata-limit", "component.json")
@@ -311,6 +313,8 @@ def read_archive(ref: PackageRef, data: bytes, path: str = "archive") -> tuple[C
             fail("private-key", p)
     if source_tree_digest(c, payloads) != c["identity"]["sourceTreeDigest"]:
         fail("source-digest", "component.json")
+    from .foundations import validate_package_foundations
+    validate_package_foundations(c, payloads)
     # Re-encoding also rejects hidden extended headers and nonzero trailing bytes.
     normalized = io.BytesIO()
     with tarfile.open(fileobj=normalized, mode="w", format=tarfile.USTAR_FORMAT) as archive:
@@ -329,6 +333,7 @@ def resolve(requirements: list[Requirement], catalogue: Path,
     entries = catalogue_entries(catalogue)
     index = {(e["name"], e["version"]): e for e in entries}
     selected = {}
+    manifests = []
     pending = list(requirements)
     while pending:
         req = requirement(pending.pop(), "requirements")
@@ -341,8 +346,11 @@ def resolve(requirements: list[Requirement], catalogue: Path,
         if ref is None:
             fail("package-unavailable", req["name"])
         c, _ = read_package(ref, catalogue.parent)
+        manifests.append(c)
         selected[req["name"]] = {**ref, "dependencies": c["dependencies"]}
         pending.extend(c["dependencies"])
+    from .foundations import validate_graph
+    validate_graph(manifests)
     packages = []
     for name in sorted(selected):
         p = selected[name]

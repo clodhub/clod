@@ -53,8 +53,9 @@ class World:
 
     `manifests` and `suitability` are by slot id (and `application`) for the components that fill the slots."""
 
-    def __init__(self, recipe, application, packages, substitutes=None):
+    def __init__(self, recipe, application, packages, substitutes=None, authority=None):
         self.recipe, self.application, self.packages = recipe, application, packages
+        self.authority = authority
         self.substitutes = dict(substitutes or {})
         self.slots = {slot["id"]: slot for slot in recipe["components"]}
         self.filling = {}
@@ -84,7 +85,11 @@ class World:
             if (directory / "component.json").is_file():
                 package = Package(read(directory / "component.json"), lambda path, root=directory: (root / path).read_bytes())
                 packages[(package.name, package.version)] = package
-        return cls(recipe, read(Path(recipe_directory) / "component.json"), packages)
+        application = read(Path(recipe_directory) / "component.json")
+        authority = Package(application, lambda path: (Path(recipe_directory) / path).read_bytes())
+        from .foundations import validate_package_foundations
+        validate_package_foundations(application, {item["path"]: authority.file(item["path"]) for item in application["files"]})
+        return cls(recipe, application, packages, authority=authority)
 
     @classmethod
     def from_store(cls, name, version, store, substitutes=None):
@@ -117,10 +122,10 @@ class World:
         world = cls(recipe, manifest, {})
         keys = set(world.wanted()) | set((substitutes or {}).values())
         packages = {key: loaded for key in sorted(keys) if (loaded := package(key)) is not None}
-        return cls(recipe, manifest, packages, substitutes)
+        return cls(recipe, manifest, packages, substitutes, Package(manifest, payloads.__getitem__))
 
     def with_recipe(self, recipe):
-        return World(recipe, self.application, self.packages, self.substitutes)
+        return World(recipe, self.application, self.packages, self.substitutes, self.authority)
 
 
 def candidate_key(candidate, preferred):
@@ -143,47 +148,52 @@ def setting_schema(declaration):
     return schema
 
 
-def module_paths(documents):
-    """platform -> entry path for every x-ourapps-modules map of the class's interface documents."""
-    modules = []
-    for document in documents:
-        try:
-            value = json.loads(document)
-        except ValueError:
-            continue
-        for platform, path in (value.get("x-ourapps-modules") or {}).items() if isinstance(value, dict) else ():
-            modules.append((platform, path))
-    return modules
+def _class_payloads(package, reference):
+    from .foundations import validate_class_descriptor
+    from .model import fail
+    for entry in package.manifest["classes"]:
+        if entry["reference"] == reference:
+            descriptor = validate_class_descriptor(entry["descriptor"])
+            return {item["path"]: package.file(item["path"]) for item in descriptor["inventory"]}
+    fail("class-unavailable", reference["name"])
 
 
-NATIVE = ("apple", "android")
+def fit(reference, package, authority, targets=None):
+    """Fit against a digest-bound class carried by the authority package."""
+    return _fit(reference, package, authority, targets, check_graph=True)
 
 
-def fit(slot_class, package, preferred):
-    """Why `package` does not fit `slot_class` (rules 1 to 4), or an empty list when it fits. `preferred` is the slot's
-    preferred component, whose interface documents define the class's documents."""
+def _fit(reference, package, authority, targets, *, check_graph):
+    from .foundations import class_descriptor, validate_class_reference, validate_graph
+    from .model import AepmError
+    validate_class_reference(reference)
+    if authority is None:
+        return ["class-unavailable:" + reference["name"]]
+    try:
+        slot_class = class_descriptor(authority.manifest, _class_payloads(authority, reference), reference)
+        class_descriptor(package.manifest, _class_payloads(package, reference), reference)
+    except AepmError as error:
+        return [error.code + ":" + reference["name"]]
     reasons = []
     manifest = package.manifest
+    if check_graph:
+        try:
+            validate_graph([authority.manifest, manifest])
+        except AepmError as error:
+            reasons.append(error.code + ":" + error.path)
+    if reference not in manifest["implements"]:
+        reasons.append("class-implementation:" + reference["name"])
     provided = {(port["type"], port["version"]): port for port in manifest["provides"]}
-    preferred_ports = {(port["type"], port["version"]): port for port in preferred.manifest["provides"]}
-    documents = []
     for interface in slot_class["provides"]:
         key = (interface["type"], interface["version"])
-        theirs, ours = provided.get(key), preferred_ports.get(key)
-        if theirs is None:
+        if key not in provided:
             reasons.append(f"provides:{key[0]}@{key[1]}")
-            continue
-        expected = preferred.file(ours["path"]) if ours is not None else None
-        if expected is None or package.file(theirs["path"]) != expected:
-            reasons.append(f"document:{key[0]}@{key[1]}")
-            continue
-        documents.append(expected)
     allowed = {(interface["type"], interface["version"]) for interface in slot_class["requires"]}
     for port in manifest["requires"]:
         if not port.get("optional") and (port["type"], port["version"]) not in allowed:
             reasons.append(f"requires:{port['type']}@{port['version']}")
     settings = {item["id"]: item for item in manifest["collect"]}
-    schema = slot_class["configuration"]
+    schema = slot_class["settings"]
     for name, wanted in schema.get("properties", {}).items():
         declaration = settings.get(name)
         if declaration is None:
@@ -196,14 +206,15 @@ def fit(slot_class, package, preferred):
             reasons.append(f"unset-setting:{declaration['id']}")
     short = "components/" + package.name.split("/", 1)[1] + "/"
     destinations = [item["destination"] for item in manifest["artefacts"]]
-    for platform, path in module_paths(documents):
-        if not isinstance(path, str):
-            reasons.append(f"module:{platform}")
-        elif platform in NATIVE:
-            if not any(item.startswith(short + path.rstrip("/") + "/") for item in destinations):
-                reasons.append(f"module:{platform}:{path}")
-        elif short + path not in destinations:
-            reasons.append(f"module:{platform}:{path}")
+    supported = {platform for interface in slot_class["provides"] for platform in interface["modules"]}
+    selected = supported if targets is None else supported.intersection(targets)
+    for platform in sorted(selected):
+        if platform not in manifest["platforms"]:
+            reasons.append(f"platform:{platform}")
+        for interface in slot_class["provides"]:
+            for path in interface["modules"].get(platform, []):
+                if not any(item == short + path or item.startswith(short + path.rstrip("/") + "/") for item in destinations):
+                    reasons.append(f"module:{platform}:{path}")
     return reasons
 
 
@@ -657,11 +668,19 @@ class _Evaluation:
 
     def run(self):
         recipe = self.recipe
+        from .foundations import selected_targets, validate_graph
+        from .model import AepmError
         for qid in self.supplied:
             if qid not in self.questions:
                 self.error("invalid-answer", f"answers.{qid}")
         for q in recipe["questions"]:
             self.resolve(q["id"])
+        try:
+            targets = selected_targets(self.world.application, {key: value for key, value in self.values.items() if value is not UNSET})
+        except AepmError:
+            self.error("invalid-answer", "answers.targets")
+            return self.failure()
+        self.targets = targets
 
         for slot in self.world.substitutes:
             if slot not in self.components:
@@ -670,11 +689,7 @@ class _Evaluation:
             if c["id"] not in self.filling:
                 self.error("unknown-component", c["id"])
                 continue
-            preferred = self.world.packages.get((c["preferred"]["name"], c["preferred"]["version"]))
-            if preferred is None:
-                self.error("unknown-component", c["id"])
-                continue
-            for reason in fit(c["class"], self.filling[c["id"]], preferred):
+            for reason in _fit(c["class"], self.filling[c["id"]], self.world.authority, targets, check_graph=False):
                 self.error("unfit", f"{c['id']}:{reason}")
         if self.errors:
             return self.failure()
@@ -688,6 +703,10 @@ class _Evaluation:
 
         settings = self.settings(included, selected_settings)
         connections = self.connections(included)
+        try:
+            validate_graph([self.manifests[item] for item in order], targets)
+        except AepmError as error:
+            self.error(error.code, error.path)
         if self.errors:
             return self.failure()
 
@@ -748,7 +767,6 @@ class _Evaluation:
             if slot not in included or slot in self.world.substitutes:
                 continue  # rule 15: a job whose slot is left out selects nothing and cannot be uncovered
             spec = self.components[slot]
-            preferred = self.world.packages[(spec["preferred"]["name"], spec["preferred"]["version"])]
             candidates = []
             for candidate in job["candidates"]:
                 key = candidate_key(candidate, spec["preferred"])
@@ -756,7 +774,7 @@ class _Evaluation:
                 if package is None:
                     self.error("unknown-component", f"jobs.{job['id']}.{candidate['component']}")
                     continue
-                for reason in fit(spec["class"], package, preferred):
+                for reason in _fit(spec["class"], package, self.world.authority, self.targets, check_graph=False):
                     self.error("unfit", f"{slot}:{candidate['component']}:{reason}")
                 if candidate.get("includedWhen") is not None and not self.holds(candidate["includedWhen"]):
                     continue
@@ -932,8 +950,8 @@ def to_json(result):
     return json.dumps(result, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
 
 
-def slot_fit(world, slot, package):
+def slot_fit(world, slot, package, targets=None):
     """Why `package` does not fit `slot` of the world's recipe, or an empty list when it fits."""
     spec = world.slots[slot]
-    preferred = world.packages[(spec["preferred"]["name"], spec["preferred"]["version"])]
-    return fit(spec["class"], package, preferred)
+    from .foundations import selected_targets
+    return fit(spec["class"], package, world.authority, targets if targets is not None else selected_targets(world.application, {}))

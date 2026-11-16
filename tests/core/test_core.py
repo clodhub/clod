@@ -21,7 +21,8 @@ def fixture(root, name="sample", version="0.1.0", dependencies=None):
                "example.json": b'{"format":1}', "NOTICE": b"Copyright Level N Ltd 2026\n",
                "visual.json": b"{}", "visual.svg": b"<svg/>", "visual.png": b"PNG",
                "description.txt": b"Connected example\n", "fixture.txt": b"fixture\n",
-               "test.py": b"assert 2 + 2 == 4\n", "run.sh": b"#!/bin/sh\nexit 0\n"}
+                "test.py": b"assert 2 + 2 == 4\n", "run.sh": b"#!/bin/sh\nexit 0\n",
+                "class-check.py": b"import json, os\nfrom pathlib import Path\nm = json.loads(Path(os.environ['AEPM_CANDIDATE_MANIFEST']).read_text())\nassert m['identity']['name'].startswith('ourapps-ae/')\nassert all(Path(p).is_file() for p in json.loads(os.environ['AEPM_MODULE_MAP']).values())\n"}
     for path, data in content.items():
         (root / path).write_bytes(data)
         (root / path).chmod(0o755 if path == "run.sh" else 0o644)
@@ -49,6 +50,16 @@ def fixture(root, name="sample", version="0.1.0", dependencies=None):
                            "fixtures": ["fixture.txt"], "locks": [], "network": False,
                            "timeoutSeconds": 10, "expectedExit": 0, "scope": "platform", "requirements": ["external:native"]}],
          "upgrade": {"policy": "patch", "migration": "files-only"}}
+    descriptor = {"format": 1, "name": "ourapps-ae/fixture-" + name, "version": "1.0.0", "provides": [], "requires": [],
+                  "settings": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
+                  "inventory": [{"path": "class-check.py", "digest": digest(content["class-check.py"])}],
+                  "verification": [{**copy.deepcopy(c["verification"][0]), "id": "behaviour", "argv": ["python3", "class-check.py"],
+                                    "fixtures": ["class-check.py"]}]}
+    reference = {"name": descriptor["name"], "version": descriptor["version"], "digest": digest(canonical(descriptor))}
+    c.update(platforms=["web"], classes=[{"reference": reference, "descriptor": descriptor}], implements=[reference], upstream=[],
+             compatibility={"runtimes": {}, "frameworks": {}, "dependencies": [], "styles": {"scope": "none", "namespaces": [], "conflicts": []}},
+             maintenance={"owners": ["Fixture Maintainer"], "contact": "mailto:fixture@example.org", "repository": "https://example.org/fixture",
+                          "updates": {"source": "https://example.org/fixture/releases", "strategy": "manual"}})
     (root / "component.json").write_bytes(canonical(c))
     return c
 
@@ -99,6 +110,10 @@ class CoreTests(unittest.TestCase):
                    "seconds": 0, "reason": "" if s["scope"] == "required-local" else "Tool unavailable",
                    "logDigest": digest(b"")}
                   for s in binding["suites"]]
+        from aepm.foundations import class_result_evidence
+        for result, suite in zip(suites, binding["suites"]):
+            if "class" in suite:
+                result["classEvidence"] = class_result_evidence(suite, self.source)
         return {"format": 1, "context": "review",
                 **{k: binding[k] for k in ("lockDigest", "assemblyDigest", "packages", "suiteSetDigest")},
                 "suites": suites, "summary": {"required-local": "passed", "platform": "blocked", "deployed": "not-applicable"}}
@@ -404,8 +419,9 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(binding["lockDigest"], digest(canonical(binding["lock"])))
         refs = sorted([ref, middle_ref, leaf_ref], key=lambda p: p["name"])
         self.assertEqual(binding["assemblyDigest"], digest(canonical({"packages": refs})))
+        from aepm.foundations import class_suites
         declarations = sorted([{"package": p["digest"], **suite} for p in refs
-                               for suite in read_package(p, self.store)[0]["verification"]],
+                               for suite in [*read_package(p, self.store)[0]["verification"], *class_suites(read_package(p, self.store)[0])]],
                               key=lambda suite: (suite["package"], suite["id"]))
         self.assertEqual(binding["suites"], declarations)
         self.assertEqual(binding["suiteSetDigest"], digest(canonical(declarations)))
@@ -639,7 +655,7 @@ class CoreTests(unittest.TestCase):
                 report["suites"][1]["status"] = "failed"
                 report["suites"][1]["exitCode"] = 1
             elif mutation == "scope":
-                report["suites"][0]["scope"] = "required-local"
+                report["suites"][0]["scope"] = "platform"
             elif mutation == "digest":
                 report["suiteSetDigest"] = "a" * 64
             elif mutation == "packages":
@@ -664,7 +680,7 @@ class CoreTests(unittest.TestCase):
         ref = pack(self.source, self.store)
         self.release(ref)
         report = self.report(ref)
-        self.assertEqual(len(report["suites"]), 4)
+        self.assertEqual(len(report["suites"]), 6)
         self.guardian(ref, report)
         verify_package(ref, self.store, self.policy)
         statement = self.guardian(ref, report)
@@ -681,7 +697,8 @@ class CoreTests(unittest.TestCase):
         ref = pack(self.source, self.store)
         self.release(ref)
         binding = review_bindings(ref, self.store)
-        self.assertEqual({s["id"] for s in binding["suites"]}, {"unit", "native"})
+        self.assertEqual({s["id"] for s in binding["suites"] if "class" not in s}, {"unit", "native"})
+        self.assertEqual(len(binding["suites"]), 3)
         self.guardian(ref)
         verify_package(ref, self.store, self.policy)
 
