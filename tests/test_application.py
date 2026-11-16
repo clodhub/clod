@@ -21,7 +21,12 @@ from aepm.trust import (RELEASE, publish_release, publish_review, release_statem
                         verify_package)
 from aepm.verification import check_report, retained_manifests, review_package, verify_application
 from aepm.verification import execute_suite
-from tests.core.test_core import fixture
+from tests.core.test_core import PYTHON, fixture
+
+
+# A directory mode a snapshot can observe: Windows records only the read-only attribute.
+DIRECTORY_MODE = 0o555 if os.name == "nt" else 0o750
+FILE_MODE = 0o444 if os.name == "nt" else 0o755
 
 
 def source(root, name, version="0.1.0", recipe=False):
@@ -39,7 +44,7 @@ def source(root, name, version="0.1.0", recipe=False):
                               "template": True, "executable": False}]
     if recipe:
         manifest["verification"].append({**deepcopy(manifest["verification"][0]), "id": "assembled", "root": "application",
-                                          "argv": ["python3", "-c", "from pathlib import Path; assert Path('app.txt').read_text().startswith('count=7'); assert Path('components/sample/value.txt').exists()"],
+                                          "argv": [PYTHON, "-c", "from pathlib import Path; assert Path('app.txt').read_text().startswith('count=7'); assert Path('components/sample/value.txt').exists()"],
                                           "fixtures": ["app.txt"]})
     write(root / "component.json", manifest)
     return manifest
@@ -194,7 +199,7 @@ class ApplicationTests(unittest.TestCase):
             verify_application(self.app, self.policy, True)
 
     def test_update_preserves_unmanaged_and_keeps_backup(self):
-        self.app.chmod(0o750)
+        self.app.chmod(DIRECTORY_MODE)
         (self.app / "notes.txt").write_text("keep me")
         (self.app / ".aepm/custom-empty").mkdir()
         proposal, value = self.proposal()
@@ -203,7 +208,7 @@ class ApplicationTests(unittest.TestCase):
         self.assertIn("0.1.1", (self.app / "components/sample/value.txt").read_text())
         self.assertEqual((self.app / "notes.txt").read_text(), "keep me")
         self.assertTrue((self.app / ".aepm/custom-empty").is_dir())
-        self.assertEqual(self.app.stat().st_mode & 0o7777, 0o750)
+        self.assertEqual(self.app.stat().st_mode & 0o7777, DIRECTORY_MODE)
         self.assertTrue((Path(value["stage"]).parent / "backup/notes.txt").exists())
         self.assertEqual(update.recover(self.app), assembly)
 
@@ -221,7 +226,7 @@ class ApplicationTests(unittest.TestCase):
             self.proposal()
 
     def test_failed_application_verification_blocks_proposal(self):
-        self.publish_recipe(lambda manifest: manifest["verification"][-1].update(argv=["python3", "-c", "raise SystemExit(9)"]))
+        self.publish_recipe(lambda manifest: manifest["verification"][-1].update(argv=[PYTHON, "-c", "raise SystemExit(9)"]))
         before = snapshot(self.app)
         with self.assertRaisesRegex(AepmError, "report-verdict"):
             self.proposal()
@@ -241,9 +246,9 @@ class ApplicationTests(unittest.TestCase):
         directory.mkdir()
         (directory / "fixture").write_text("fixture")
         suite = {"package": "0" * 64, "id": "scrub", "scope": "required-local", "root": "package",
-                 "argv": ["python3", "-c", "import os; from pathlib import Path; assert 'AWS_SECRET_ACCESS_KEY' not in os.environ; assert Path('prepared').read_text() == 'ready'"],
-                 "cwd": ".", "prepare": [{"argv": ["python3", "-c", "from pathlib import Path; Path('prepared').write_text('ready')"], "cwd": ".", "network": False}],
-                 "tools": {"python3": "3"}, "fixtures": ["fixture"], "locks": [], "network": False, "timeoutSeconds": 10,
+                 "argv": [PYTHON, "-c", "import os; from pathlib import Path; assert 'AWS_SECRET_ACCESS_KEY' not in os.environ; assert Path('prepared').read_text() == 'ready'"],
+                 "cwd": ".", "prepare": [{"argv": [PYTHON, "-c", "from pathlib import Path; Path('prepared').write_text('ready')"], "cwd": ".", "network": False}],
+                 "tools": {PYTHON: "3"}, "fixtures": ["fixture"], "locks": [], "network": False, "timeoutSeconds": 10,
                  "expectedExit": 0, "requirements": []}
         with patch.dict(os.environ, {"AWS_SECRET_ACCESS_KEY": "PRIVATE_SENTINEL"}):
             report = execute_suite(suite, directory, False, self.root / "logs")
@@ -255,7 +260,7 @@ class ApplicationTests(unittest.TestCase):
         suite["prepare"][0]["network"] = True
         self.assertEqual(execute_suite(suite, directory, False, self.root / "logs")["status"], "blocked")
         suite["prepare"] = []
-        suite["argv"] = ["python3", "-c", "import sys; sys.stdout.write('x' * (8 * 1024 * 1024 + 1))"]
+        suite["argv"] = [PYTHON, "-c", "import sys; sys.stdout.write('x' * (8 * 1024 * 1024 + 1))"]
         self.assertEqual(execute_suite(suite, directory, False, self.root / "logs")["reason"], "output-limit")
 
     def test_stale_unmanaged_addition_deletion_edit_mode(self):
@@ -274,9 +279,9 @@ class ApplicationTests(unittest.TestCase):
                 elif mode == "edit":
                     (app / "notes").write_text("edited")
                 elif mode == "mode":
-                    (app / "notes").chmod(0o755)
+                    (app / "notes").chmod(FILE_MODE)
                 else:
-                    app.chmod(0o750)
+                    app.chmod(DIRECTORY_MODE)
                 before = snapshot(app)
                 with self.assertRaises(AepmError):
                     update.apply(app, proposal, approval, self.policy)

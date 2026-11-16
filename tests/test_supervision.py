@@ -14,6 +14,10 @@ from aepm import process
 from aepm.private_process import Identity, PrivateScope
 from aepm.posix_process import ContainedProcess
 
+import os
+if os.name == "nt":
+    raise unittest.SkipTest("simulated POSIX private-process supervisor")
+
 
 class SupervisionContractTests(unittest.TestCase):
     def setUp(self):

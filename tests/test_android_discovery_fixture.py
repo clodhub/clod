@@ -19,6 +19,9 @@ from tests.discovery_observer import DiscoveryObserver
 from tests import test_discovery_observer as fake
 from tests import run_android_discovery_fixture as entry
 
+if os.name == "nt":
+    raise unittest.SkipTest("POSIX private-process Android discovery")
+
 
 class GuardedTests(unittest.TestCase):
     def setUp(self):

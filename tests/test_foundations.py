@@ -22,7 +22,7 @@ from aepm.recipe import Package, fit
 from aepm.test_identities import generate
 from aepm.trust import publish_release, publish_review, review_bindings, verify_package
 from aepm.verification import review_package
-from tests.core.test_core import fixture
+from tests.core.test_core import PYTHON, fixture
 
 
 CHECK = b"""import importlib.util, json, os
@@ -55,10 +55,10 @@ def counter(root, name="counter", implementation=b"def increment(value):\n    re
                                 "modules": {"web": ["counter.py"], "ios": ["counter.py"]}}],
                   "requires": [], "settings": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
                   "inventory": [{"path": path, "digest": digest(raw)} for path, raw in data.items() if path.startswith("classes/")],
-                  "verification": [{**deepcopy(manifest["verification"][0]), "id": "increment", "argv": ["python3", "classes/counter/check.py"],
+                  "verification": [{**deepcopy(manifest["verification"][0]), "id": "increment", "argv": [PYTHON, "classes/counter/check.py"],
                                     "fixtures": ["classes/counter/check.py"]}]}
     reference = {"name": descriptor["name"], "version": descriptor["version"], "digest": digest(canonical(descriptor))}
-    manifest.update(platforms=["web", "ios"], classes=[{"reference": reference, "descriptor": descriptor}], implements=[reference],
+    manifest.update(platforms=["web", "ios"], toolchains={"web": [], "ios": []}, classes=[{"reference": reference, "descriptor": descriptor}], implements=[reference],
                     provides=[{"id": "counter", "type": "counter", "version": "1.0.0", "path": "interface.txt"}],
                     artefacts=[{"source": "source/counter.py", "destination": f"components/{name}/counter.py", "template": False, "executable": False}])
     write(root / "component.json", manifest)
@@ -93,7 +93,7 @@ class FoundationTests(unittest.TestCase):
         return policy
 
     def test_required_metadata_is_strict(self):
-        for key in ("classes", "implements", "platforms", "upstream", "compatibility", "maintenance"):
+        for key in ("classes", "implements", "platforms", "toolchains", "upstream", "compatibility", "maintenance"):
             changed = deepcopy(self.manifest)
             del changed[key]
             with self.subTest(key=key), self.assertRaisesRegex(AepmError, "invalid-fields"):
@@ -273,6 +273,7 @@ class FoundationTests(unittest.TestCase):
         other_root = self.root / "other"
         other = counter(other_root, "other")
         other["platforms"] = ["web"]
+        other["toolchains"] = {"web": []}
         self.assertEqual(fit(self.ref(), self.package(other, other_root), self.package(), ["web"]), [])
         self.assertEqual(fit(self.ref(), self.package(other, other_root), self.package(), ["ios"]), ["platform:ios"])
         other["artefacts"] = []
@@ -294,6 +295,7 @@ class FoundationTests(unittest.TestCase):
             selected_targets(self.manifest, {"targets": ["android"]})
         other = deepcopy(self.manifest)
         other["platforms"] = ["web"]
+        other["toolchains"] = {"web": []}
         with self.assertRaisesRegex(AepmError, "unsupported-platform"):
             validate_graph([other], ["ios"])
 

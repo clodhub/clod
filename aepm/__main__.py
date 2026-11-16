@@ -1,7 +1,6 @@
 """Frozen local installer commands."""
 
 import argparse
-import os
 from pathlib import Path
 import shutil
 import sys
@@ -9,7 +8,7 @@ import sys
 from .application import assemble, read_assembly, requirements, validate_definition
 from .bundle import pack, read_package, resolve
 from .export import export_design
-from .io import fail, load, write
+from .io import fail, linked, load, write
 from .model import AepmError, canonical, digest
 from .trust import sign
 from .verification import review_package, verify_application
@@ -69,6 +68,11 @@ def parser():
     get.add_argument("--store", type=Path, required=True)
     get.add_argument("--from", dest="origin", default="https://ourapps.app")
     get.add_argument("--with-dependencies", action="store_true")
+    check = commands.add_parser("doctor")
+    check.add_argument("recipe")
+    check.add_argument("--store", type=Path, required=True)
+    check.add_argument("--answers", type=Path)
+    check.add_argument("--install", action="store_true")
     ask = commands.add_parser("questions")
     ask.add_argument("recipe")
     ask.add_argument("--store", type=Path, required=True)
@@ -126,6 +130,15 @@ def dispatch(args):
             reasons = slot_fit(candidate, args.slot, candidate.filling[args.slot])
             result.append({"name": package_name, "version": package_version, "fits": not reasons, "reasons": reasons})
         return result
+    if command == "doctor":
+        from .doctor import Refused as DesignRefused, doctor
+        answers = load(args.answers) if args.answers is not None else {}
+        if type(answers) is not dict:
+            fail("invalid-answers", "answers")
+        try:
+            return doctor(*identity(args.recipe), args.store, answers, install=args.install)
+        except DesignRefused as refused:
+            raise Refused(refused.errors)
     if command in ("design", "questions"):
         from .recipe import World, evaluate, questions
         substitutes = {}
@@ -146,8 +159,6 @@ def dispatch(args):
         definition = validate_definition(result["design"])
         write(args.out, definition)
         return {"definition": str(args.out), "digest": digest(canonical(definition)), "components": len(definition["components"])}
-    if os.name == "nt" and command in ("pack", "propose-update", "approve", "apply", "recover"):
-        fail("unsupported-host", command)
     execution_options = {}
     if command in ("verify", "review", "propose-update"):
         execution_options = {"execution_context": args.context, "authorization": args.authorization,
@@ -207,7 +218,7 @@ def dispatch(args):
         source = approve(Path(args.proposal), Path(args.key), Path(args.policy))
         destination = Path(args.out)
         if source.absolute() != destination.absolute():
-            if destination.exists() or destination.is_symlink():
+            if destination.exists() or linked(destination):
                 fail("approval-output-exists", "approval")
             shutil.copyfile(source, destination)
         return {"approval": str(destination)}
@@ -222,6 +233,10 @@ def main(argv=None):
     try:
         args = parser().parse_args(argv)
         result = dispatch(args)
+        if args.command == "doctor":
+            healthy = all(tool["status"] == "ok" for tool in result["tools"])
+            print(canonical({"ok": healthy, "result": result}).decode("utf-8"))
+            return int(not healthy)
         print(canonical({"ok": True, "result": result}).decode("utf-8"))
         return int(args.command in ("verify", "review") and result["summary"]["required-local"] != "passed")
     except Refused as refused:

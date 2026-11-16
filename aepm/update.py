@@ -2,43 +2,61 @@
 
 from contextlib import contextmanager
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import shutil
 
 from .application import assemble, read_assembly, requirements, validate_definition
-from .io import exact, fail, fields, load, rooted, snapshot, sync_directory, write
+from .io import exact, fail, fields, linked, load, rooted, snapshot, sync_directory, write
 from .model import AepmError, Assembly, Proposal, canonical, digest, guarded
-from .verification import check_report, retained_manifests, transaction_path, verify_application
+from .verification import TRUSTED, check_report, retained_manifests, transaction_path, verify_application
 
 
 from .trust import UPDATE_BINDINGS as BINDINGS
 
 
+def _lock(stream):
+    """Exclusive, nonblocking: flock on POSIX, a one-byte region lock on Windows."""
+    try:
+        if os.name == "nt":
+            import msvcrt
+            stream.seek(0)
+            msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fail("transaction-busy", "transaction")
+
+
+def _unlock(stream):
+    if os.name == "nt":
+        import msvcrt
+        stream.seek(0)
+        msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+        fcntl.flock(stream, fcntl.LOCK_UN)
+
+
 @contextmanager
 def transaction(root):
-    if os.name == "nt":
-        fail("unsupported-host", "update")
-    import fcntl
     root = Path(root).absolute()
     for path in (root.parent, *root.parent.parents):
-        if path.is_symlink() or not path.is_dir():
+        if linked(path) or not path.is_dir():
             fail("ordinary-parent", "application")
     directory = transaction_path(root)
-    if directory.is_symlink():
+    if linked(directory):
         fail("symlink", "transaction")
     directory.mkdir(exist_ok=True)
     lock = directory / "lock"
-    if lock.is_symlink():
+    if linked(lock):
         fail("symlink", "transaction")
     with lock.open("a+b") as stream:
-        try:
-            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            fail("transaction-busy", "transaction")
+        _lock(stream)
         try:
             yield directory
         finally:
-            fcntl.flock(stream, fcntl.LOCK_UN)
+            _unlock(stream)
 
 
 def tree_digest(root, assembly):
@@ -59,7 +77,7 @@ def propose(root: Path, definition, store: Path, policy: Path, trusted: bool, *,
     root = Path(root).absolute()
     definition = validate_definition(definition)
     if trusted is not True:
-        fail("trusted-execution-required", "trusted")
+        fail("trusted-execution-required", TRUSTED)
     with transaction(root) as directory:
         if (directory / "journal.json").exists() or (directory / "backup").exists():
             fail("pending-recovery-or-cleanup", "transaction")
@@ -85,7 +103,7 @@ def propose(root: Path, definition, store: Path, policy: Path, trusted: bool, *,
         stage.chmod(root.stat().st_mode & 0o7777)
         old_owned = {item["path"] for item in previous["files"]}
         new_owned = {item["path"] for item in next_assembly["files"]}
-        old_directories = {str(parent) for path in old_owned for parent in Path(path).parents if str(parent) != "."}
+        old_directories = {parent.as_posix() for path in old_owned for parent in PurePosixPath(path).parents if parent.as_posix() != "."}
         # Preserve every unmanaged file and directory; never adopt an unmanaged collision.
         for record in before:
             path = record["path"]
@@ -220,7 +238,15 @@ def journal(directory, value, phase):
 
 
 def rename(source, destination):
-    os.rename(source, destination)
+    """Move a whole tree. The destination must not exist; Windows moves are write-through and retried briefly while
+    another process (an indexer or scanner) still holds a handle inside the tree."""
+    if os.path.lexists(destination):
+        fail("rename-destination-exists", str(destination))
+    if os.name == "nt":
+        from .windows import move
+        move(source, destination)
+    else:
+        os.rename(source, destination)
     sync_directory(Path(source).parent)
     if Path(source).parent != Path(destination).parent:
         sync_directory(Path(destination).parent)

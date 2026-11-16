@@ -4,6 +4,7 @@ import contextlib
 from copy import deepcopy
 import io
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -13,12 +14,13 @@ from aepm.__main__ import main
 from aepm.authorization import execution_request, authorize_execution
 from aepm.bundle import pack, read_package
 from aepm.environment import clock, describe_resource
+from aepm.environment import path_platform
 from aepm.io import load, write
 from aepm.model import AepmError, canonical, digest
 from aepm.test_identities import generate
 from aepm.trust import publish_release, publish_review, review_bindings, sign, validate_report_evidence
 from aepm.verification import review_package
-from tests.core.test_core import fixture
+from tests.core.test_core import PYTHON, fixture
 
 
 BUILD = '''import hashlib,json,os,py_compile
@@ -46,16 +48,16 @@ class SuiteSelectionTests(unittest.TestCase):
         unit = manifest["verification"][0]
         unit["execution"] = dict(kind="local", simulation=False, operations=[], settings=[], secrets=[], resources=[], assertions=[], cleanup=None)
         build = deepcopy(unit)
-        build.update(id="build", argv=["python3", "build.py"], scope="platform")
+        build.update(id="build", argv=[PYTHON, "build.py"], scope="platform")
         build["execution"].update(kind="native", operations=["native-build"], assertions=["build-produced"])
         runtime = deepcopy(unit)
-        runtime.update(id="runtime", argv=["python3", "-c", "raise AssertionError('Runtime must not execute')"], scope="platform",
+        runtime.update(id="runtime", argv=[PYTHON, "-c", "raise AssertionError('Runtime must not execute')"], scope="platform",
                        requirements=["external:android-test-environment"])
         runtime["execution"] = dict(kind="native", simulation=False, operations=["create-temporary-emulator", "native-test"],
                                     settings=["androidDeviceProfile", "androidSystemImage"], secrets=[],
                                     resources=[dict(id="androidJavaHome", required=True, access="read-only"), dict(id="androidSdk", required=True, access="copy")],
                                     assertions=["tests-discovered", "tests-executed", "tests-passed"],
-                                    cleanup=dict(argv=["python3", "-c", "raise AssertionError('Cleanup must not execute')"], cwd=".", timeoutSeconds=10))
+                                    cleanup=dict(argv=[PYTHON, "-c", "raise AssertionError('Cleanup must not execute')"], cwd=".", timeoutSeconds=10))
         provider = deepcopy(unit)
         provider.update(id="provider", scope="deployed")
         provider["execution"].update(kind="provider", assertions=["response-valid"])
@@ -76,9 +78,9 @@ class SuiteSelectionTests(unittest.TestCase):
         for identifier in ("androidJavaHome", "androidSdk"):
             path = self.root / identifier
             path.mkdir()
-            resources.append(describe_resource(identifier, path))
+            resources.append(describe_resource(identifier, path, executables=[] if os.name == "nt" else None))
         self.context = self.root / "context.json"
-        write(self.context, dict(format=1, id="native-fixture", pathPlatform="posix", mode="local", simulationKind=None,
+        write(self.context, dict(format=1, id="native-fixture", pathPlatform=path_platform(), mode="local", simulationKind=None,
                                  settings=dict(androidDeviceProfile="pixel_6", androidSystemImage="system-images;android-36;google_apis;arm64-v8a"),
                                  resources=resources, secrets={}))
         self.request, self.state, self.authorization = self.root / "request.json", self.root / "state", self.root / "authorization"

@@ -134,8 +134,6 @@ def atomic_write(path: Path, data: bytes) -> None:
 
 @guarded
 def pack(source: Path, store: Path) -> PackageRef:
-    if os.name == "nt":
-        fail("unsupported-host", "pack")
     ordinary_path(source)
     ordinary_path(store, missing=True)
     ordinary_path(source / "component.json")
@@ -144,6 +142,8 @@ def pack(source: Path, store: Path) -> PackageRef:
     if len(paths) > MAX_MEMBERS:
         fail("member-limit", "files")
     check_paths(paths)
+    if os.name == "nt":
+        validate_windows_paths(paths)
     payloads = {}
     total = 0
     for item in component["files"]:
@@ -159,8 +159,8 @@ def pack(source: Path, store: Path) -> PackageRef:
             fail("unsafe-file", p)
         if file.stat().st_size > MAX_FILE:
             fail("file-limit", p)
-        # Source execute bits must agree; write bits are normalized.
-        if bool(file.stat().st_mode & 0o111) != item["executable"]:
+        # POSIX execute bits must agree with the manifest; Windows has none, so the manifest alone decides.
+        if os.name != "nt" and bool(file.stat().st_mode & 0o111) != item["executable"]:
             fail("mode-mismatch", p)
         data = file.read_bytes()
         if any(marker in data for marker in (

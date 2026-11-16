@@ -13,7 +13,7 @@ from aepm.bundle import pack
 from aepm.io import load, write
 from aepm.model import canonical, digest
 from aepm.recipe import CelError, World, evaluate, evaluate_condition, fit, parse_condition, question_kinds, questions, slot_fit
-from tests.core.test_core import fixture
+from tests.core.test_core import PYTHON, fixture
 
 
 def component(root, name, provides=(), requires=(), collect=(), profiles=None, document="{}"):
@@ -60,8 +60,8 @@ def slot(identifier, name, provides=(), properties=None, required=(), includedWh
                   "requires": [], "settings": {"type": "object", "properties": properties or {}, "required": list(required), "additionalProperties": False},
                   "inventory": [{"path": "class-check.py", "digest": digest(check)},
                                 *[{"path": f"classes/{identifier}/{port}.json", "digest": digest(b"{}")} for port in provides]],
-                  "verification": [{"id": "behaviour", "root": "package", "argv": ["python3", "class-check.py"], "cwd": ".", "prepare": [],
-                                    "tools": {"python3": "3"}, "fixtures": ["class-check.py"], "locks": [], "network": False,
+                  "verification": [{"id": "behaviour", "root": "package", "argv": [PYTHON, "class-check.py"], "cwd": ".", "prepare": [],
+                                    "tools": {PYTHON: "3"}, "fixtures": ["class-check.py"], "locks": [], "network": False,
                                     "timeoutSeconds": 10, "expectedExit": 0, "scope": "required-local", "requirements": []}]}
     reference = {"name": descriptor["name"], "version": descriptor["version"], "digest": digest(canonical(descriptor))}
     SLOT_CLASSES[identifier] = {"reference": reference, "descriptor": descriptor}
@@ -126,6 +126,7 @@ class RecipeDesignTests(unittest.TestCase):
             pack(cls.root / name, cls.store)
         recipe = component(cls.root / "game", "game", requires=["deck"])
         recipe["platforms"] = ["web", "ios"]
+        recipe["toolchains"] = {"web": [], "ios": []}
         recipe["kind"] = "recipe"
         recipe["artefacts"][0]["destination"] = "run.sh"
         recipe["classes"] = []

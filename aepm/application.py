@@ -9,7 +9,7 @@ import tempfile
 from urllib.parse import urlsplit
 
 from .model import Assembly, Definition, Lock, canonical, digest, guarded, validate_lock
-from .io import exact, fail, fields, load, package_name, relative, rooted, snapshot, write
+from .io import exact, fail, fields, linked, load, package_name, relative, rooted, snapshot, write
 from .diagram import generate as renderer
 
 
@@ -316,7 +316,7 @@ def assemble(definition: Definition, lock: Lock, store: Path, destination: Path,
     documents = {ref["digest"]: read_package({key: ref[key] for key in ("name", "version", "digest")}, Path(store)) for ref in lock["packages"]}
     validate_selection(definition, {key: item[0] for key, item in documents.items()}, payloads={key: item[1] for key, item in documents.items()})
     destination = Path(destination).absolute()
-    if destination.exists() or destination.is_symlink() or not destination.parent.is_dir() or destination.parent.is_symlink():
+    if destination.exists() or linked(destination) or not destination.parent.is_dir() or linked(destination.parent):
         fail("target-exists", "target")
     with tempfile.TemporaryDirectory(prefix=".aepm-assembly-", dir=destination.parent) as temporary:
         root = Path(temporary) / "application"

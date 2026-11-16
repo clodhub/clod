@@ -372,6 +372,7 @@ class ValidationTests(unittest.TestCase):
         self.assert_invalid(value, "item limit")
 
 
+@unittest.skipIf(os.name == "nt", "POSIX process groups bound the renderer")
 class ProcessTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()

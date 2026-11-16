@@ -21,6 +21,9 @@ from aepm.supervision import Recorder
 from tests.test_discovery_observer import FakeBindings
 from tests.test_private_process import FakeBackend
 
+if os.name == "nt":
+    raise unittest.SkipTest("POSIX private-process capture")
+
 
 class RacingBackend(FakeBackend):
     def __init__(self, records):

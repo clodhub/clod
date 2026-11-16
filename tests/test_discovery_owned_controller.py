@@ -11,6 +11,9 @@ from unittest.mock import Mock, patch
 from aepm.private_process import DarwinBackend
 from tests import run_discovery_owned_fixture as controller
 
+if os.name == "nt":
+    raise unittest.SkipTest("POSIX private-process discovery controller")
+
 
 class ControllerFailureTests(unittest.TestCase):
     def setUp(self):

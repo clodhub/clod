@@ -14,7 +14,7 @@ from .model import (array, boolean, canonical, choice, digest, fail, fields, gua
                     unique, version)
 
 PLATFORMS = ("web", "server", "ios", "macos", "tvos", "android", "windows")
-FOUNDATION_FIELDS = "platforms classes implements upstream compatibility maintenance"
+FOUNDATION_FIELDS = "platforms toolchains classes implements upstream compatibility maintenance"
 
 
 def validate_class_reference(value: object) -> dict:
@@ -164,6 +164,8 @@ def validate_foundations(manifest: dict) -> None:
     platforms = _strings(manifest["platforms"], "platforms", True)
     for platform in platforms:
         choice(platform, PLATFORMS, "platforms")
+    from .toolchains import validate_toolchains
+    validate_toolchains(manifest)
     identities = []
     refs = []
     for item in array(manifest["classes"], "classes"):
@@ -369,6 +371,9 @@ def validate_graph(manifests: list[dict], targets: list[str] | None = None) -> N
                     or set(other["conflicts"]) & set(current["namespaces"])):
                 fail("stylesheet-conflict", manifest["identity"]["name"])
         styles.append(current)
+    if targets is not None:
+        from .toolchains import merge_toolchains
+        merge_toolchains(manifests, targets)
 
 
 def class_suites(manifest: dict) -> list[dict]:

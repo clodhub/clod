@@ -13,6 +13,10 @@ from aepm.supervision import Recorder
 from tests.test_capture_race import Clock, Guarded
 from tests.test_private_process import FakeBackend
 
+import unittest
+if os.name == "nt":
+    raise unittest.SkipTest("POSIX process-group signals")
+
 
 def owned(pid=210, key=7210, group=300, status=2):
     return Identity(pid, key, os.geteuid(), 1, group, status, "/outside/program", "/outside", token=AuditToken())

@@ -13,12 +13,13 @@ from aepm.__main__ import main
 from aepm.authorization import execution_request, authorize_execution
 from aepm.bundle import pack, read_package
 from aepm.environment import clock, claim_key
+from aepm.environment import path_platform
 from aepm.io import load, write
 from aepm.model import AepmError, canonical, digest
 from aepm.test_identities import generate
 from aepm.trust import EXECUTION_AUTHORIZATION, authorization_view, publish_release, review_bindings, sign, validate_report_evidence, verify
 from aepm.verification import review_package
-from tests.core.test_core import fixture
+from tests.core.test_core import PYTHON, fixture
 
 
 SCRIPT = '''import json, os
@@ -52,7 +53,7 @@ class ExecutionContextTests(unittest.TestCase):
         manifest["verification"][0]["execution"] = {"kind": "local", "simulation": False, "operations": [],
                                                        "settings": [], "secrets": [], "resources": [], "assertions": [], "cleanup": None}
         provider = deepcopy(manifest["verification"][0])
-        provider.update(id="provider-fixture", argv=["python3", "check.py"], fixtures=["fixture.json"])
+        provider.update(id="provider-fixture", argv=[PYTHON, "check.py"], fixtures=["fixture.json"])
         provider["execution"] = {"kind": "provider", "simulation": True, "operations": [], "settings": ["expectedUpdateVersion"],
                                  "secrets": ["livekitKey"], "resources": [], "assertions": ["version-match"], "cleanup": None}
         manifest["verification"].append(provider)
@@ -69,7 +70,7 @@ class ExecutionContextTests(unittest.TestCase):
         policy["trustedExecution"] = [self.ref["digest"]]
         write(self.policy, policy)
         self.context = self.root / "context.json"
-        write(self.context, {"format": 1, "id": "fixture", "pathPlatform": "posix", "mode": "simulation", "simulationKind": "fixture",
+        write(self.context, {"format": 1, "id": "fixture", "pathPlatform": path_platform(), "mode": "simulation", "simulationKind": "fixture",
                              "settings": {"expectedUpdateVersion": "1.2.3", "maximumSeconds": 10}, "resources": [],
                              "secrets": {"livekitKey": {"secretRef": "synthetic", "version": "1"}}})
         self.secret_file = self.root / "secrets.json"

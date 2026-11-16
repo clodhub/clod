@@ -10,6 +10,7 @@ python3 -m aepm inspect DIGEST --store STORE
 python3 -m aepm bom DIGEST --store STORE --out NAME-VERSION.cdx.json
 python3 -m aepm fetch NAME@VERSION... --store STORE [--from https://ourapps.app] [--with-dependencies]
 python3 -m aepm questions RECIPE@VERSION --store STORE
+python3 -m aepm doctor RECIPE@VERSION --store STORE [--answers ANSWERS] [--install]
 python3 -m aepm design RECIPE@VERSION --store STORE [--answers ANSWERS] [--substitute SLOT=NAME@VERSION]... --out DEFINITION
 python3 -m aepm alternatives RECIPE@VERSION SLOT --store STORE [--from https://ourapps.app]
 python3 -m aepm resolve DEFINITION --catalogue STORE/catalogue.json --out LOCK
@@ -33,6 +34,8 @@ Each entry of a recipe's `recipe.json` `components` is a slot: `{id, class: {nam
 `questions` prints a recipe's questions (id, ask, askAgent, type, options or min/max, default, askWhen). `design` applies the recipe evaluation rules 1 to 25 of the component standard (`aepm.recipe.evaluate`, CEL conditions included) to the recipe's `recipe.json` and the components' manifests and `suitability.json`, all read from the store archives, and writes the application definition. Unanswered questions take their defaults. When the answers do not give a design it prints `{"ok": false, "errors": [{code, path}]}` and exits 1, writing nothing. `aepm.recipe.World.from_directories(recipe, components)` evaluates source trees instead.
 
 Installation runs no package code. Release and guardian attestations must exist before installation. Review runs before guardian signing. Reports preserve required-local, platform and deployed partitions.
+
+`doctor` checks the build tools that the design's selected targets need (`toolchains`, see [FOUNDATIONS.md](FOUNDATIONS.md#doctor)); `--install` runs the host's package-manager command for each missing tool.
 
 `bom` writes a CycloneDX 1.6 JSON bill of materials with the wrapper identity and licence, archive and file hashes, package dependencies, and every upstream identity, version, licence expression, revision, repository, notice path and delivery kind. Bundled upstream files and build-time lock files are digest-checked during packing and reading. Installation downloads no build dependencies.
 
@@ -81,7 +84,7 @@ Resource records bind bytes and modes. Read-only Apple/Java inventories record i
 
 `aepm.environment.describe_resource(identifier, path, inventory_root=None, executables=None)` constructs resource descriptors with the same inventory used during execution. Unix hosts derive executable paths; Windows requires an explicit executable list. It hashes file contents and can be expensive for complete toolchains. Resource validation never silently drops files or escapes the signed boundary.
 
-Windows verification uses suspended-process Job Object containment and protected private files; native execution must be verified on an actual Windows host. Windows packing and transactional update commands are unsupported. The actual-host regression in `tests/windows/` is explicitly skipped on other hosts; simulated branches do not establish native success.
+Windows verification uses suspended-process Job Object containment and protected private files; native execution must be verified on an actual Windows host. `pack`, `propose-update`, `approve`, `apply` and `recover` run on Windows. Executable flags come from the manifest there, and the same source gives the same archive bytes as on macOS or Linux. Symbolic links, junctions and other reparse points are rejected wherever links are. Whole-tree moves use write-through `MoveFileExW` without replacement, retried for up to five seconds while another process holds a handle inside the tree; the transaction lock is a one-byte region lock. Snapshots record the mode Windows reports, so a read-only attribute change invalidates approval while POSIX execute bits do not exist. The actual-host regression in `tests/windows/` is explicitly skipped on other hosts; simulated branches do not establish native success.
 
 On supported 64-bit macOS and Linux with the GNU C library, the runner observes child exit without reaping, finishes owned-group signals and checks, then reaps once. Default child-signal handling and exclusive ownership of child waits are required. Cooperating commands must remain in that group; deliberate session escape remains an expected failing boundary test, not a containment guarantee. Browser checks must use the shared non-detached launcher with executable/profile paths inside runner-issued `AEPM_PRIVATE_ROOT`. Failed cleanup retains private files for inspection and records their location in the step index; secret-material removal is attempted independently.
 
@@ -91,6 +94,17 @@ Configuration uses fixed grammars. Secret values are symbolic references and nev
 
 Stop application processes before applying updates. A sibling `.<name>.aepm-transaction/` directory holds the stage, report, proposal, owner approval, lock and durable recovery journal. Owner approval binds the complete original and staged trees, including unmanaged files and metadata. Any observed change invalidates approval. Recovery finds that sibling even when the application directory is absent. Committed backups remain for explicit later cleanup; remove a completed transaction directory only after retaining any required evidence. Cooperating writers use an exclusive lock; uncooperative concurrent edits are unsupported.
 
-Run `python3 -m unittest discover -s tests` for local checks. The diagram renderer is vendored; consumers need no sibling checkout.
+Update an installed application with its next definition (for example from `design`); each step refuses unless the previous one succeeded:
+
+```sh
+python3 -m aepm propose-update APP NEXT_DEFINITION --store STORE --policy POLICY --trusted [--allow-network] --out PROPOSAL
+python3 -m aepm approve PROPOSAL --key OWNER_KEY --policy POLICY --out APPROVAL
+python3 -m aepm apply APP PROPOSAL --approval APPROVAL --policy POLICY
+python3 -m aepm recover APP
+```
+
+`propose-update` installs the next assembly into the sibling stage and runs its packages' declared verification checks there, so it needs `--trusted` and every package digest in the policy's `trustedExecution`; without `--trusted` it refuses with `trusted-execution-required` and writes nothing. `apply` checks the owner approval against the unchanged application and stage, then swaps the trees under the journal. `recover` completes or reverses an interrupted `apply` and confirms a committed one.
+
+Run `python3 -m unittest discover -s tests` for local checks. The diagram renderer is vendored; consumers need no sibling checkout. Test modules for the POSIX private-process supervisor, version-manager shims and Darwin discovery skip on Windows. `python -B tests/run_update_cycle.py WORK` packs, reviews, installs and updates a fixture through the command line, then recovers an interrupted apply.
 
 For a dependency-free real package, run `AEPM_REVIEW_SOURCE=/absolute/package python3 -m unittest tests.test_packaged_review -v`. This packs the actual allowlist, creates disposable external identities, performs release-verified review and permits guardian acceptance only after required-local suites pass. Optional `AEPM_REVIEW_EVIDENCE=/absolute/report.json` retains the complete report.

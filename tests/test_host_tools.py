@@ -10,6 +10,9 @@ from aepm.model import AepmError, validate_component
 from aepm.verification import execution_environment
 from tests.core.test_core import fixture
 
+if os.name == "nt":
+    raise unittest.SkipTest("POSIX version-manager shims")
+
 
 def executable(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)

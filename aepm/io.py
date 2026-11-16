@@ -63,6 +63,15 @@ def load(path: str | Path) -> Any:
         fail("document", path)
 
 
+def linked(path) -> bool:
+    """True for a symbolic link, junction or other reparse point."""
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    return stat.S_ISLNK(info.st_mode) or bool(getattr(info, "st_file_attributes", 0) & 0x400)
+
+
 def sync_directory(path):
     if os.name == "nt":
         from .windows import ntfs
@@ -78,7 +87,7 @@ def sync_directory(path):
 def write(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.is_symlink():
+    if linked(path):
         fail("symlink", path)
     descriptor, temporary = tempfile.mkstemp(prefix=".write-", dir=path.parent)
     try:
@@ -180,7 +189,7 @@ def rooted(root, value, dot=False):
     root = Path(root)
     candidate = root / value
     for parent in (candidate, *candidate.parents):
-        if parent.is_symlink():
+        if linked(parent):
             fail("symlink", value)
         if parent == root:
             break
@@ -203,7 +212,7 @@ def package_name(value):
 
 def snapshot(root, assembly=None):
     root = Path(root)
-    if root.is_symlink() or not root.is_dir():
+    if linked(root) or not root.is_dir():
         fail("ordinary-directory", root)
     owners = {item["path"]: item["owner"] for item in (assembly or {}).get("files", [])}
     records = [{"path": ".", "kind": "directory", "digest": None,
@@ -218,7 +227,7 @@ def snapshot(root, assembly=None):
                 fail("case-collision", key)
             seen.add(key.casefold())
             info = path.lstat()
-            if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
+            if linked(path) or not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
                 fail("special-file", key)
             records.append({"path": key, "kind": "directory" if path.is_dir() else "file",
                             "digest": None if path.is_dir() else digest(path.read_bytes()),

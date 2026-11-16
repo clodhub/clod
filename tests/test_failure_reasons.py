@@ -11,6 +11,7 @@ from aepm import contextual
 from aepm.environment import Execution
 from aepm.io import load
 from aepm.verification import summary
+from tests.core.test_core import PYTHON
 
 
 class FailureReasonTests(unittest.TestCase):
@@ -24,7 +25,7 @@ class FailureReasonTests(unittest.TestCase):
         self.logs = self.root / "logs"
         self.execution = Execution({}, self.root / "unused-policy", self.root / "evidence")
         self.suite = {"package": "a" * 64, "id": "fixture", "root": "package", "scope": "platform",
-                      "argv": ["python3", "-c", "pass"], "cwd": ".", "prepare": [], "tools": {"python3": "3"},
+                      "argv": [PYTHON, "-c", "pass"], "cwd": ".", "prepare": [], "tools": {PYTHON: "3"},
                       "fixtures": ["fixture"], "locks": [], "network": False, "timeoutSeconds": 30,
                       "expectedExit": 0, "requirements": [], "execution": {"kind": "local", "simulation": False,
                       "operations": [], "settings": [], "secrets": [], "resources": [], "assertions": [], "cleanup": None}}
@@ -41,8 +42,8 @@ class FailureReasonTests(unittest.TestCase):
 
     def test_nonzero_preparation_has_reason_and_prevents_main(self):
         suite = deepcopy(self.suite)
-        suite["prepare"] = [{"argv": ["python3", "-c", "raise SystemExit(1)"], "cwd": ".", "network": False}]
-        suite["argv"] = ["python3", "-c", "raise AssertionError('main must not run')"]
+        suite["prepare"] = [{"argv": [PYTHON, "-c", "raise SystemExit(1)"], "cwd": ".", "network": False}]
+        suite["argv"] = [PYTHON, "-c", "raise AssertionError('main must not run')"]
         result, evidence, events = self.execute(suite)
         self.assertEqual((result["status"], result["exitCode"], result["reason"]), ("failed", 1, "preparation-failed"))
         self.assertFalse(evidence["checkStarted"])
@@ -52,8 +53,8 @@ class FailureReasonTests(unittest.TestCase):
 
     def test_nonzero_main_preserves_successful_preparation_and_partitions(self):
         suite = deepcopy(self.suite)
-        suite["prepare"] = [{"argv": ["python3", "-c", "pass"], "cwd": ".", "network": False}]
-        suite["argv"] = ["python3", "-c", "raise SystemExit(1)"]
+        suite["prepare"] = [{"argv": [PYTHON, "-c", "pass"], "cwd": ".", "network": False}]
+        suite["argv"] = [PYTHON, "-c", "raise SystemExit(1)"]
         result, evidence, events = self.execute(suite)
         self.assertEqual((result["status"], result["exitCode"], result["reason"]), ("failed", 1, "process-failed"))
         self.assertTrue(evidence["checkStarted"])

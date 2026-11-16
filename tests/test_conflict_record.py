@@ -15,6 +15,10 @@ from aepm.supervision import Recorder
 from tests.test_capture_race import Guarded
 from tests.test_private_process import FakeBackend
 
+import unittest
+if os.name == "nt":
+    raise unittest.SkipTest("POSIX private-process conflict records")
+
 
 def process(pid, cwd="/outside", executable="/outside/tools/helper", parent=1, group=999, status=2):
     return Identity(pid, pid, os.geteuid(), parent, group, status, executable, cwd, started_ns=1)

@@ -21,9 +21,12 @@ const pair = c.generateKeyPairSync('ed25519');
 fs.writeFileSync(process.argv[1], pair.privateKey.export({type:'pkcs8',format:'pem'}), {mode:0o600});
 process.stdout.write(pair.publicKey.export({type:'spki',format:'pem'}));
 """
+    environment = {"PATH": os.environ.get("PATH", os.defpath)}
+    if os.name == "nt":
+        environment["SYSTEMROOT"] = os.environ["SYSTEMROOT"]
     for role in ("release", "guardian", "owner"):
         result = subprocess.run(["node", "-e", script, str(destination / (role + ".pem"))],
-                                check=True, capture_output=True, env={"PATH": os.environ.get("PATH", os.defpath)})
+                                check=True, capture_output=True, env=environment)
         keys[role] = [{"publicKey": result.stdout.decode("ascii")}]
     policy = {"format": 1, "keys": keys, "trustedExecution": []}
     write(destination / "policy.json", policy)

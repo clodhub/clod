@@ -11,6 +11,9 @@ from aepm.model import AepmError
 from aepm.private_process import CaptureRace, CombinedInfo, DarwinBackend, Identity
 from tests import test_private_process as fixtures
 
+if os.name == "nt":
+    raise unittest.SkipTest("POSIX and Darwin exit confirmation")
+
 
 class DarwinExitQueryTests(unittest.TestCase):
     def backend(self, status=5, failure=None):

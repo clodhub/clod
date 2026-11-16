@@ -18,6 +18,9 @@ from aepm import contextual, verification
 from aepm.model import AepmError
 from aepm.tool_selection import ToolSelection, load_tool_selection, require_selection
 
+if os.name == "nt":
+    raise unittest.SkipTest("POSIX tool-selection aliases; Windows refuses tool selection")
+
 
 def executable(path, content=b"#!/bin/sh\n"):
     path.parent.mkdir(parents=True, exist_ok=True)

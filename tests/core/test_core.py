@@ -15,7 +15,11 @@ from aepm.trust import (RELEASE, REVIEW, release_statement, review_bindings, rev
                         verify_package)
 
 
-def fixture(root, name="sample", version="0.1.0", dependencies=None):
+# The suite tool: Windows installs Python as `python`.
+PYTHON = "python" if os.name == "nt" else "python3"
+
+
+def fixture(root, name="sample", version="0.1.0", dependencies=None, python=PYTHON):
     root.mkdir(parents=True)
     content = {"CONTRACT.md": b"# Contract\n", "interface.txt": b"interface\n",
                "example.json": b'{"format":1}', "NOTICE": b"Copyright Level N Ltd 2026\n",
@@ -41,8 +45,8 @@ def fixture(root, name="sample", version="0.1.0", dependencies=None):
                     "outputs": ["visual.svg", "visual.png"], "descriptions": ["description.txt"]},
          "capabilities": {"hosts": [], "secrets": [], "writes": []},
          "infrastructure": {"accounts": [], "costStatus": "unmeasured", "deployedReason": "Not deployed"},
-         "verification": [{"id": "unit", "root": "package", "argv": ["python3", "test.py"],
-                           "cwd": ".", "prepare": [], "tools": {"python3": "3"},
+         "verification": [{"id": "unit", "root": "package", "argv": [python, "test.py"],
+                           "cwd": ".", "prepare": [], "tools": {python: "3"},
                            "fixtures": ["fixture.txt"], "locks": [], "network": False,
                            "timeoutSeconds": 10, "expectedExit": 0, "scope": "required-local", "requirements": []},
                           {"id": "native", "root": "package", "argv": ["unavailable"],
@@ -53,10 +57,10 @@ def fixture(root, name="sample", version="0.1.0", dependencies=None):
     descriptor = {"format": 1, "name": "ourapps-ae/fixture-" + name, "version": "1.0.0", "provides": [], "requires": [],
                   "settings": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
                   "inventory": [{"path": "class-check.py", "digest": digest(content["class-check.py"])}],
-                  "verification": [{**copy.deepcopy(c["verification"][0]), "id": "behaviour", "argv": ["python3", "class-check.py"],
+                  "verification": [{**copy.deepcopy(c["verification"][0]), "id": "behaviour", "argv": [python, "class-check.py"],
                                     "fixtures": ["class-check.py"]}]}
     reference = {"name": descriptor["name"], "version": descriptor["version"], "digest": digest(canonical(descriptor))}
-    c.update(platforms=["web"], classes=[{"reference": reference, "descriptor": descriptor}], implements=[reference], upstream=[],
+    c.update(platforms=["web"], toolchains={"web": []}, classes=[{"reference": reference, "descriptor": descriptor}], implements=[reference], upstream=[],
              compatibility={"runtimes": {}, "frameworks": {}, "dependencies": [], "styles": {"scope": "none", "namespaces": [], "conflicts": []}},
              maintenance={"owners": ["Fixture Maintainer"], "contact": "mailto:fixture@example.org", "repository": "https://example.org/fixture",
                           "updates": {"source": "https://example.org/fixture/releases", "strategy": "manual"}})
@@ -170,9 +174,11 @@ class CoreTests(unittest.TestCase):
         self.release(first)
         target = self.root / "review"
         extract_review(first, self.store, target, self.policy)
-        subprocess.run(["python3", "test.py"], cwd=target, check=True)
-        self.assertEqual((target / "run.sh").stat().st_mode & 0o777, 0o755)
+        subprocess.run([PYTHON, "test.py"], cwd=target, check=True)
+        if os.name != "nt":
+            self.assertEqual((target / "run.sh").stat().st_mode & 0o777, 0o755)
 
+    @unittest.skipIf(os.name == "nt", "Windows has no execute bits; the manifest decides")
     def test_source_execute_mode_mismatch(self):
         (self.source / "run.sh").chmod(0o644)
         with self.assertRaisesRegex(AepmError, "mode-mismatch"):

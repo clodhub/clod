@@ -9,6 +9,10 @@ These fields accompany the package manifest's other required fields. The complet
 ```json
 {
   "platforms": ["web", "server"],
+  "toolchains": {
+    "web": [{"name": "node", "versionRange": ">=22.0.0 <27.0.0", "probe": ["node", "--version"], "install": {"macos": ["brew", "install", "node"], "windows": ["winget", "install", "--exact", "--id", "OpenJS.NodeJS"], "linux": ["sudo", "apt-get", "install", "--yes", "nodejs"]}, "manual": null}],
+    "server": [{"name": "node", "versionRange": ">=22.0.0 <27.0.0", "probe": ["node", "--version"], "install": {"macos": ["brew", "install", "node"], "windows": ["winget", "install", "--exact", "--id", "OpenJS.NodeJS"], "linux": ["sudo", "apt-get", "install", "--yes", "nodejs"]}, "manual": null}]
+  },
   "classes": [{"reference": {"name": "ourapps-ae/counter-class", "version": "1.0.0", "digest": "6a64a8ced4936b20db0cf0e54193b361e5922f8f013a71ab7ea885ffe3e8085d"}, "descriptor": {"format": 1, "name": "ourapps-ae/counter-class", "version": "1.0.0", "provides": [{"type": "counter", "version": "1.0.0", "path": "classes/counter/interface.json", "modules": {"web": ["counter.mjs"], "server": ["counter.mjs"]}}], "requires": [], "settings": {"type": "object", "properties": {}, "required": [], "additionalProperties": false}, "inventory": [{"path": "classes/counter/interface.json", "digest": "316538fd92c18f09d76df05de128d1099d00d7cfbf34401f82b1bd56989ba0d2"}, {"path": "classes/counter/check.mjs", "digest": "7b6a4b0a9ba601c7c2f058f62d46b4d349c8010bd6c3f9f5d28b762209735770"}], "verification": [{"id": "behaviour", "root": "package", "argv": ["node", "classes/counter/check.mjs"], "cwd": ".", "prepare": [], "tools": {"node": "26"}, "fixtures": ["classes/counter/check.mjs"], "locks": [], "network": false, "timeoutSeconds": 30, "expectedExit": 0, "scope": "required-local", "requirements": []}]}}],
   "implements": [{"name": "ourapps-ae/counter-class", "version": "1.0.0", "digest": "6a64a8ced4936b20db0cf0e54193b361e5922f8f013a71ab7ea885ffe3e8085d"}],
   "upstream": [],
@@ -92,6 +96,69 @@ Styles use scope `none`, `scoped` or `global`. `none` has empty namespaces and c
 
 Maintenance has nonempty owners, contact and repository, and updates with a source and strategy `manual` or `release`. Verification dates are facts derived from validated signed review reports outside manifests. A manifest has no verification timestamp or self-referencing archive digest.
 
+## Toolchains
+
+`toolchains` maps every declared platform, and only those, to the tools a machine needs to build that platform's outputs. A list may be empty. Test-suite `tools` pins remain separate. A complete declaration for a package supporting web, iOS and Android:
+
+```json
+{
+  "toolchains": {
+    "web": [
+      {"name": "node", "versionRange": ">=22.0.0 <27.0.0", "probe": ["node", "--version"],
+       "install": {"macos": ["brew", "install", "node"], "windows": ["winget", "install", "--exact", "--id", "OpenJS.NodeJS"], "linux": ["sudo", "apt-get", "install", "--yes", "nodejs"]},
+       "manual": null}
+    ],
+    "ios": [
+      {"name": "xcodebuild", "versionRange": ">=16.0.0 <27.0.0", "probe": ["xcodebuild", "-version"],
+       "install": {"macos": null, "windows": null, "linux": null},
+       "manual": "Install Xcode from the Mac App Store, open it once and accept the licence."},
+      {"name": "xcodegen", "versionRange": ">=2.40.0 <3.0.0", "probe": ["xcodegen", "--version"],
+       "install": {"macos": ["brew", "install", "xcodegen"], "windows": null, "linux": null},
+       "manual": null}
+    ],
+    "android": [
+      {"name": "java", "versionRange": ">=21.0.0 <27.0.0", "probe": ["java", "-version"],
+       "install": {"macos": ["brew", "install", "--cask", "temurin"], "windows": ["winget", "install", "--exact", "--id", "EclipseAdoptium.Temurin.21.JDK"], "linux": ["sudo", "apt-get", "install", "--yes", "openjdk-21-jdk"]},
+       "manual": null},
+      {"name": "sdkmanager", "versionRange": ">=12.0.0", "probe": ["sdkmanager", "--version"],
+       "install": {"macos": ["brew", "install", "--cask", "android-commandlinetools"], "windows": null, "linux": null},
+       "manual": "Set ANDROID_HOME, then run sdkmanager --licenses and accept every licence."}
+    ]
+  }
+}
+```
+
+A tool has exactly `name`, `versionRange`, `probe`, `install` and `manual`:
+
+- `name`: lowercase letters, digits, `.`, `+` and `-`, starting with a letter. Names are unique within a platform.
+- `versionRange`: the comparator subset used for runtimes.
+- `probe`: an argument list whose first item is a command name without a path; aepm finds it on `PATH` (version-manager shims resolve to the selected executable). The first version number in the combined output, `MAJOR[.MINOR[.PATCH]]` padded with zeros, is compared with the range. A probe exiting nonzero gives no version.
+- `install`: exactly `macos`, `windows` and `linux`, each null or an argument list beginning `brew install`, `winget install`, or `apt-get install` / `sudo apt-get install` respectively, with at least one further argument.
+- `manual`: text for steps no package manager performs, or null. A tool with no installer and no manual text is invalid.
+
+Declarations of one tool name, within a package or across a graph, share identical `probe`, `install` and `manual`; their ranges intersect, and an empty intersection is `toolchain-conflict`. Design and installation check these merges over the selected targets.
+
+## Doctor
+
+`aepm doctor RECIPE@VERSION --store STORE [--answers FILE] [--install]` evaluates the design as `design` does, resolves its package graph, merges the toolchains of the selected targets, and probes each tool. It prints `{"ok": BOOL, "result": {host, targets, tools}}`, where `host` is `{os, architecture}` with `os` one of `macos`, `windows`, `linux`, and each tool is `{name, required, platforms, found, version, status, install, manual}`. `required` is the merged range in `>=X.Y.Z[ <X.Y.Z]` form, `found` is the resolved executable path or null, `status` is `ok`, `missing` or `wrong-version`, and `install` is the argument list for this host or null. `ok` is true only when every tool is `ok`; otherwise the command exits 1.
+
+`--install` runs, one at a time, the host's install argument list for each `missing` tool that has one, writing `$ COMMAND` to standard error before each and sending installer output to standard error. It adds `installed: [{name, argv, exitCode}]` and probes again. Wrong versions and manual steps are reported, not changed. Without `--install`, doctor installs nothing.
+
+```json
+{"ok": false, "result": {
+  "host": {"architecture": "arm64", "os": "macos"},
+  "targets": ["ios", "server", "web"],
+  "tools": [
+    {"found": "/opt/homebrew/Cellar/node/26.5.0/bin/node", "install": ["brew", "install", "node"], "manual": null, "name": "node",
+     "platforms": ["server", "web"], "required": ">=22.0.0 <27.0.0", "status": "ok", "version": "26.5.0"},
+    {"found": "/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild", "install": null,
+     "manual": "Install Xcode from the Mac App Store, open it once and accept the licence.", "name": "xcodebuild",
+     "platforms": ["ios"], "required": ">=16.0.0 <27.0.0", "status": "ok", "version": "26.1.0"},
+    {"found": null, "install": ["brew", "install", "xcodegen"], "manual": null, "name": "xcodegen",
+     "platforms": ["ios"], "required": ">=2.40.0 <3.0.0", "status": "missing", "version": null}
+  ]}}
+```
+
 ## Public helpers
 
 ```python
@@ -109,6 +176,8 @@ class_suites(manifest: dict) -> list[dict]
 class_result_evidence(suite: dict, source: Path, started_at: int | None = None, completed_at: int | None = None) -> dict
 validate_class_result_evidence(result: dict, suite: dict) -> None
 ```
+
+`aepm.toolchains` provides `validate_tool(value, path) -> dict`, `merge_toolchains(manifests, targets=None) -> list[dict]` and `probe_version(output) -> tuple | None`; `aepm.doctor.doctor(recipe, version, store, answers, *, install=False, host=None, which, runner, installer, announce) -> dict` accepts replacement lookup, probe and installer functions.
 
 `aepm.foundations` owns these helpers. `aepm.recipe.fit(reference, package, authority, targets=None)` returns fit failure reasons; `authority` is a package containing the authoritative class bytes, independent of a preferred implementation.
 

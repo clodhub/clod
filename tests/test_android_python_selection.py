@@ -13,6 +13,10 @@ from aepm.supervision import Recorder
 from tests import test_android_discovery_fixture as fixtures
 from tests import run_android_discovery_fixture as entry
 
+import unittest
+if os.name == "nt":
+    raise unittest.SkipTest("POSIX tool-selection aliases")
+
 
 class PythonSelectionTests(fixtures.GuardedTests):
     def selection(self):

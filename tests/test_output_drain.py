@@ -11,6 +11,9 @@ from unittest.mock import Mock, patch
 
 from aepm import process
 
+if os.name == "nt":
+    raise unittest.SkipTest("POSIX private-process output draining")
+
 
 class FakeClock:
     def __init__(self):

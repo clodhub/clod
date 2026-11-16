@@ -27,6 +27,10 @@
   "verification": [{"id": "unit", "root": "package", "argv": ["node", "tests/unit.mjs"], "cwd": ".", "prepare": [], "tools": {"node": "26"}, "fixtures": ["tests/unit.mjs", "src/counter.mjs"], "locks": [], "network": false, "timeoutSeconds": 30, "expectedExit": 0, "scope": "required-local", "requirements": []}],
   "upgrade": {"policy": "patch", "migration": "files-only"},
   "platforms": ["web", "server"],
+  "toolchains": {
+    "web": [{"name": "node", "versionRange": ">=22.0.0 <27.0.0", "probe": ["node", "--version"], "install": {"macos": ["brew", "install", "node"], "windows": ["winget", "install", "--exact", "--id", "OpenJS.NodeJS"], "linux": ["sudo", "apt-get", "install", "--yes", "nodejs"]}, "manual": null}],
+    "server": [{"name": "node", "versionRange": ">=22.0.0 <27.0.0", "probe": ["node", "--version"], "install": {"macos": ["brew", "install", "node"], "windows": ["winget", "install", "--exact", "--id", "OpenJS.NodeJS"], "linux": ["sudo", "apt-get", "install", "--yes", "nodejs"]}, "manual": null}]
+  },
   "classes": [{
     "reference": {"name": "ourapps-ae/counter-class", "version": "1.0.0", "digest": "6a64a8ced4936b20db0cf0e54193b361e5922f8f013a71ab7ea885ffe3e8085d"},
     "descriptor": {

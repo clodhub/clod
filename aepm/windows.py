@@ -179,6 +179,19 @@ def publish(source, destination, replace=False):
         fail("evidence-publication", "evidence")
 
 
+def move(source, destination, attempts=50):
+    """MoveFileExW with write-through and no replacement; sharing violations retry for up to five seconds."""
+    kernel = api()
+    ntfs(Path(destination).parent)
+    for _ in range(attempts):
+        if kernel.MoveFileExW(str(source), str(destination), 8):
+            return
+        if c.get_last_error() not in (5, 32, 33):
+            break
+        time.sleep(0.1)
+    fail("rename-failed", str(source))
+
+
 class OwnedPipe:
     """Retain descriptor ownership while constructing the Python stream."""
 

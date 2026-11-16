@@ -12,6 +12,10 @@ from aepm.environment import Execution, describe_resource
 from aepm.io import write
 from aepm.model import AepmError, digest
 
+import os
+if os.name == "nt":
+    raise unittest.SkipTest("macOS Apple-simulator and POSIX discovery budgets")
+
 
 class Clock:
     def __init__(self):

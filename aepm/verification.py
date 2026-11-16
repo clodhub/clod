@@ -7,12 +7,13 @@ import shutil
 import tempfile
 
 from .application import read_assembly, validate_retained_assembly
-from .io import VerificationDirectory, fail, immutable_blob, load, rooted, snapshot, write
+from .io import VerificationDirectory, fail, immutable_blob, linked, load, rooted, snapshot, write
 from .model import Report, canonical, digest, guarded, validate_component
 from .tool_selection import require_selection
 
 
 SCOPES = ("required-local", "platform", "deployed")
+TRUSTED = "--trusted is required: it permits running the packages' declared verification checks on this host"
 OUTPUT_LIMIT = 8 * 1024 * 1024
 
 
@@ -149,6 +150,18 @@ def check_links(home, tools, tool_selection):
         tool_selection.check(name, os.readlink(home / "bin" / name), tool_selection.path)
 
 
+def host_command(argv, cwd, tools, environment):
+    """POSIX launches search PATH; Windows process creation needs the resolved executable."""
+    if os.name != "nt":
+        return argv
+    from .contextual import resolve_command
+    from .model import AepmError
+    try:
+        return resolve_command(argv, cwd, tools, environment)
+    except AepmError:
+        return None
+
+
 def execute_suite(suite, source, allow_network, logs, *, tool_selection=None, adoption_root=None):
     tool_selection = require_selection(tool_selection)
     adoption = {} if adoption_root is None else {"adoption_root": adoption_root}
@@ -182,7 +195,11 @@ def execute_suite(suite, source, allow_network, logs, *, tool_selection=None, ad
                     version_flag = "-version" if name in ("java", "javac", "swift", "xcodebuild", "kotlinc") else "--version"
                     if tool_selection is not None:
                         check_links(private / "home", suite["tools"], tool_selection)
-                    tool_code, _, tool_reason, version_output = run([name, version_flag], root, environment, 10, 65536)
+                    probe = host_command([name, version_flag], root, suite["tools"], environment)
+                    if probe is None:
+                        reason = "tool-unavailable"
+                        break
+                    tool_code, _, tool_reason, version_output = run(probe, root, environment, 10, 65536)
                     if tool_reason == "cleanup-failed":
                         workspace.preserve = True
                         status, reason = "failed", "cleanup-failed"
@@ -217,6 +234,11 @@ def execute_suite(suite, source, allow_network, logs, *, tool_selection=None, ad
                 elif argv[0] not in suite["tools"]:
                     reason = "undeclared-tool"
                     break
+                else:
+                    argv = host_command(argv, cwd, suite["tools"], environment)
+                    if argv is None:
+                        reason = "tool-unavailable"
+                        break
                 if tool_selection is not None:
                     check_links(private / "home", suite["tools"], tool_selection)
                 code, duration, failure, output = run(argv, cwd, environment, suite["timeoutSeconds"], output_remaining, **adoption)
@@ -258,7 +280,7 @@ def make_report(lock, assembly_digest, manifests, roots, application_root, polic
     from .environment import Execution, clock
     from .trust import load_policy
     if trusted is not True:
-        fail("trusted-execution-required", "trusted")
+        fail("trusted-execution-required", TRUSTED)
     policy_data = load_policy(Path(policy))
     if not set(ref["digest"] for ref in lock["packages"]).issubset(set(policy_data["trustedExecution"])):
         fail("untrusted-package-execution", "policy")
@@ -309,7 +331,7 @@ def verify_application(root: Path, policy: Path, trusted: bool, *, allow_network
     root = Path(root)
     assembly, manifests = retained_manifests(root, policy)
     evidence = transaction_path(root) / "verification"
-    if evidence.parent.is_symlink() or evidence.is_symlink():
+    if linked(evidence.parent) or linked(evidence):
         fail("symlink", "verification")
     report = make_report(assembly["lock"], digest(canonical(assembly)), manifests,
                          {key: root / ".aepm/packages" / key for key in manifests}, root, policy, trusted,
@@ -330,7 +352,7 @@ def review_package(ref, store: Path, policy: Path, trusted: bool, *, allow_netwo
     adoption_root = validate_adoption_root(adoption_root)
 
     if trusted is not True:
-        fail("trusted-execution-required", "trusted")
+        fail("trusted-execution-required", TRUSTED)
     store = Path(store)
     manifest, _ = read_package(ref, store)
     lock = resolve([{key: ref[key] for key in ("name", "version")}], store / "catalogue.json",

@@ -51,10 +51,10 @@ class ExecutionEvidenceTests(unittest.TestCase):
         self.binding = review_bindings(self.ref, self.store)
         self.run_id = "1" * 64
         self.registry = self.root / "execution-state"
-        self.descriptor = {"format": 1, "id": "fixture", "pathPlatform": "windows" if windows else "posix", "mode": "local",
+        self.descriptor = {"format": 1, "id": "fixture", "pathPlatform": "windows" if windows or os.name == "nt" else "posix", "mode": "local",
                            "simulationKind": None, "settings": {"windowsArchitecture": "x64"} if windows else {}, "resources": [], "secrets": {}}
         if android:
-            self.descriptor["resources"] = [{"id": name, "kind": "directory", "path": "/absent/" + name, "digest": "a" * 64, "executables": []}
+            self.descriptor["resources"] = [{"id": name, "kind": "directory", "path": ("C:\\absent\\" if self.descriptor["pathPlatform"] == "windows" else "/absent/") + name, "digest": "a" * 64, "executables": []}
                                             for name in ("androidJavaHome", "androidSdk")]
         self.context_digest = self.retain("contexts", self.descriptor) if authorized else None
         self.authorization = {"keyId": key_id(self.keys["owner"]["publicKey"]),
@@ -331,16 +331,17 @@ class ExecutionEvidenceTests(unittest.TestCase):
             with self.assertRaises(AepmError):
                 validate_component(value)
 
+    @unittest.skipIf(os.name == "nt", "POSIX execute bits; tests.test_hosts covers Windows packing")
     def test_extracted_mode_posix_and_simulated_windows(self):
         path = self.source / "test.py"
         validate_extracted_mode(path, False)
         path.chmod(0o755)
         with self.assertRaisesRegex(AepmError, "mode-mismatch"):
             validate_extracted_mode(path, False)
+        with self.assertRaisesRegex(AepmError, "mode-mismatch"):
+            pack(self.source, self.store)
         with patch("aepm.bundle.os.name", "nt"):
             validate_extracted_mode(path, False)
-            with self.assertRaisesRegex(AepmError, "unsupported-host"):
-                pack(self.source, self.store)
         path.unlink()
         path.symlink_to(self.source / "NOTICE")
         with self.assertRaisesRegex(AepmError, "unsafe-file"):

@@ -58,6 +58,7 @@ class Component(TypedDict):
     verification: list[dict[str, Any]]
     upgrade: dict[str, str]
     platforms: list[str]
+    toolchains: dict[str, list[dict[str, Any]]]
     classes: list[dict[str, Any]]
     implements: list[PackageRef]
     upstream: list[dict[str, Any]]

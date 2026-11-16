@@ -10,6 +10,10 @@ from aepm.model import canonical
 from aepm.private_process import AuditToken, CombinedInfo, DarwinBackend
 from tests.discovery_observer import DiscoveryObserver
 
+import os
+if os.name == "nt":
+    raise unittest.SkipTest("Darwin discovery observer")
+
 
 class FakeBindings:
     def __init__(self, modes=("success",), listing=None):

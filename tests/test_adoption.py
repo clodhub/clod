@@ -14,6 +14,10 @@ from aepm.private_process import Identity, PrivateScope, adoption_root, enroll_r
 from tests.test_capture_race import Guarded
 from tests.test_private_process import FakeBackend
 
+import unittest
+if os.name == "nt":
+    raise unittest.SkipTest("POSIX private-process adoption")
+
 
 class Stubborn(FakeBackend):
     """Signals are recorded but the target never exits."""

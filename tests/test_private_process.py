@@ -20,6 +20,9 @@ from aepm.model import AepmError
 from aepm.private_process import AuditToken, DarwinBackend, LinuxBackend, Identity, PrivateScope, enroll_root
 from aepm.process import run
 
+if os.name == "nt":
+    raise unittest.SkipTest("POSIX private-process scope")
+
 
 class FakeBackend:
     def __init__(self, records):

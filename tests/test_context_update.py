@@ -8,13 +8,14 @@ from unittest.mock import patch
 from aepm.application import assemble, requirements
 from aepm.authorization import execution_request, authorize_execution
 from aepm.bundle import pack, read_package, resolve
-from aepm.environment import clock
+from aepm.environment import clock, path_platform
 from aepm.io import load, snapshot, write
 from aepm.model import AepmError, canonical, digest
 from aepm.test_identities import generate
 from aepm.trust import EXECUTION_AUTHORIZATION, publish_release, publish_review, verify, verify_package
 from aepm.update import propose, approve, apply
 from aepm.verification import review_package
+from tests.core.test_core import PYTHON
 from tests.test_application import source
 from tests.test_execution_context import SCRIPT
 
@@ -37,7 +38,7 @@ class ContextUpdateTests(unittest.TestCase):
                                               "resources": [], "assertions": [], "cleanup": None}
                     manifest["verification"][1]["execution"].update(kind="native", assertions=["build-produced"])
                     provider = deepcopy(manifest["verification"][-1])
-                    provider.update(id="context-fixture", argv=["python3", "check.py"], fixtures=["fixture.json"])
+                    provider.update(id="context-fixture", argv=[PYTHON, "check.py"], fixtures=["fixture.json"])
                     provider["execution"] = {"kind": "provider", "simulation": True, "operations": [], "settings": ["expectedUpdateVersion"],
                                              "secrets": ["livekitKey"], "resources": [], "assertions": ["version-match"], "cleanup": None}
                     manifest["verification"].append(provider)
@@ -71,7 +72,7 @@ class ContextUpdateTests(unittest.TestCase):
             preview = root / "preview"
             assemble(definition, lock, store, preview, policy_path)
             context, secret_file = root / "context.json", root / "secrets.json"
-            write(context, {"format": 1, "id": "fixture", "pathPlatform": "posix", "mode": "simulation", "simulationKind": "fixture",
+            write(context, {"format": 1, "id": "fixture", "pathPlatform": path_platform(), "mode": "simulation", "simulationKind": "fixture",
                             "settings": {"expectedUpdateVersion": "1.2.3"}, "resources": [],
                             "secrets": {"livekitKey": {"secretRef": "test-key", "version": "1"}}})
             write(secret_file, {"format": 1, "values": {"test-key": {"version": "1", "value": "SYNTHETIC"}}})
