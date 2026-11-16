@@ -80,6 +80,7 @@ class Identity:
     generation: int = 0
     started_ns: int | None = None
     executable_missing: bool = False
+    paths_unreadable: bool = False
     signals_sent: list = field(default_factory=list)
 
 
@@ -258,7 +259,15 @@ class LinuxBackend:
             result = Identity(pid, (pid, int(values[19])), uid, int(values[1]), int(values[2]), values[0], handle=descriptor,
                               generation=int(values[19]))
             if paths:
-                result.executable, result.cwd = os.readlink(root / "exe"), os.readlink(root / "cwd")
+                try:
+                    result.executable, result.cwd = os.readlink(root / "exe"), os.readlink(root / "cwd")
+                except PermissionError:
+                    # The kernel denies these links for a process of this user whose credentials differ from ours, such as a
+                    # program running with file capabilities. Only a recorded pre-existing process may be left unnamed.
+                    if not allow_missing_executable:
+                        fail("cleanup-failed", "private-process-path")
+                    result.executable = result.cwd = None
+                    result.paths_unreadable = True
             if self.exited(descriptor):
                 os.close(descriptor)
                 return None
@@ -572,7 +581,7 @@ def enroll_root(root, *, before_work=False, backend=None):
                     if _matches(root, record):
                         _record_conflict(root, "enroll", record, origin)
                         fail("cleanup-failed", "private-process-conflict")
-                    if record.executable_missing and not before_work:
+                    if (record.executable_missing or record.paths_unreadable) and not before_work:
                         if birth is None or record.started_ns is None or record.started_ns <= 0 or record.started_ns + 1_001_000 >= birth:
                             fail("cleanup-failed", "private-process-baseline-age")
                     generations[record.key] = record.generation
@@ -647,7 +656,7 @@ class PrivateScope:
         allowed = basic.key in self.registration.generations
         self.backend.close(basic)
         record = self.backend.capture(pid, paths=True, allow_missing_executable=allowed)
-        if record is not None and record.executable_missing:
+        if record is not None and (record.executable_missing or record.paths_unreadable):
             if self.registration.generations.get(record.key) != record.generation or record.uid != os.geteuid():
                 self.backend.close(record)
                 fail("cleanup-failed", "private-process-baseline-generation")

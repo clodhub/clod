@@ -35,7 +35,7 @@ class FakeBackend:
 
     def capture(self, pid, *, paths=True, allow_missing_executable=False):
         record = deepcopy(self.records.get(pid))
-        if record and paths and record.executable_missing and not allow_missing_executable:
+        if record and paths and (record.executable_missing or record.paths_unreadable) and not allow_missing_executable:
             raise AepmError("cleanup-failed", "private-process-path")
         return record
 
@@ -160,6 +160,72 @@ class SimulatedPrivateScopeTests(unittest.TestCase):
                             backend.capture(456)
                     backend.exited.assert_called_once_with(123)
                     close.assert_called_once_with(123)
+
+
+    def linux_capture(self, *, allow, readlink):
+        """LinuxBackend.capture over a simulated /proc entry of this user."""
+        backend = LinuxBackend.__new__(LinuxBackend)
+        backend.exited = Mock(return_value=False)
+        backend.open_descriptor = Mock(return_value=123)
+        fields = ["S", "1", "456"] + ["0"] * 16 + ["789"]
+        texts = {"stat": "456 (daemon) " + " ".join(fields), "status": f"Name:\tdaemon\nUid:\t{os.geteuid()}\t{os.geteuid()}\t{os.geteuid()}\t{os.geteuid()}\n"}
+
+        def read_text(path, *args, **kwargs):
+            return texts[path.name]
+
+        with patch.object(Path, "read_text", read_text), patch("aepm.private_process.os.readlink", side_effect=readlink), \
+                patch("aepm.private_process.os.close") as close:
+            try:
+                return backend.capture(456, allow_missing_executable=allow), close
+            except AepmError as error:
+                return error, close
+
+    def test_simulated_linux_unreadable_links_of_this_user(self):
+        denied = PermissionError(errno.EACCES, "Permission denied", "/proc/456/exe")
+        error, close = self.linux_capture(allow=False, readlink=denied)
+        self.assertEqual((error.code, error.path), ("cleanup-failed", "private-process-path"))
+        close.assert_called_once_with(123)
+        record, close = self.linux_capture(allow=True, readlink=denied)
+        self.assertEqual((record.uid, record.generation, record.executable, record.cwd, record.paths_unreadable),
+                         (os.geteuid(), 789, None, None, True))
+        close.assert_not_called()
+        record, _ = self.linux_capture(allow=True, readlink=lambda path: "/usr/bin/" + Path(path).name)
+        self.assertEqual((record.executable, record.paths_unreadable), ("/usr/bin/exe", False))
+
+    def test_unreadable_preexisting_process_is_baseline_never_owned(self):
+        record = Identity(100, 100, os.geteuid(), 1, 100, 2, None, None, generation=7, paths_unreadable=True)
+        backend = FakeBackend({100: record})
+        registration = enroll_root(self.root, before_work=True, backend=backend)
+        self.assertEqual(registration.generations, {100: 7})
+        scope = self.scope(backend)
+        scope.bind(300)
+        self.assertNotIn(100, scope.owned)
+        self.assertTrue(scope.finish(time.monotonic() + .2))
+        scope.close()
+        self.assertFalse(backend.signals)
+        backend.records[100].generation = 8
+        with self.assertRaisesRegex(AepmError, "private-process-baseline-generation"):
+            self.scope(backend)
+        self.assertFalse(backend.signals)
+
+    def test_unreadable_process_after_enrolment_fails_closed(self):
+        backend = FakeBackend({})
+        enroll_root(self.root, before_work=True, backend=backend)
+        scope = self.scope(backend)
+        scope.bind(300)
+        backend.records[200] = Identity(200, 200, os.geteuid(), 1, 300, 2, None, None, generation=1, paths_unreadable=True)
+        with self.assertRaisesRegex(AepmError, "private-process-path"):
+            scope.scan(force=True)
+        self.assertNotIn(200, scope.owned)
+        self.assertFalse(backend.signals)
+
+    def test_unreadable_process_needs_a_fresh_root_or_known_age(self):
+        backend = FakeBackend({100: Identity(100, 100, os.geteuid(), 1, 100, 2, None, None, paths_unreadable=True)})
+        with self.assertRaisesRegex(AepmError, "baseline-age"):
+            enroll_root(self.root, backend=backend)
+        (self.root / "work").mkdir()
+        with self.assertRaisesRegex(AepmError, "private-process-enrollment"):
+            enroll_root(self.root, before_work=True, backend=backend)
 
 
 @unittest.skipUnless(sys.platform == "darwin", "Actual macOS identity tests; Linux acceptance is separate")
