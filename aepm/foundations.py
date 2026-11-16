@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 from datetime import datetime, timezone
 from pathlib import Path
 import re
@@ -388,10 +387,16 @@ def class_suites(manifest: dict) -> list[dict]:
 
 
 def class_result_evidence(suite: dict, source: Path, started_at: int | None = None, completed_at: int | None = None) -> dict:
+    """The constant-size record of one class suite: its class and the digest of the inventory it ran.
+
+    The inventory bytes stay in the package archive, which the report binds through its package digests; the staged bytes
+    the suite ran are checked against that inventory here."""
+    for item in suite["classInventory"]:
+        if digest((Path(source) / item["path"]).read_bytes()) != item["digest"]:
+            fail("class-file-digest", item["path"])
     completed = int(time.time()) if completed_at is None else completed_at
-    return {"reference": suite["class"], "startedAt": completed if started_at is None else started_at, "completedAt": completed, "files": [
-        {**item, "content": base64.b64encode((source / item["path"]).read_bytes()).decode("ascii")}
-        for item in suite["classInventory"]]}
+    return {"reference": suite["class"], "inventoryDigest": digest(canonical(suite["classInventory"])),
+            "startedAt": completed if started_at is None else started_at, "completedAt": completed}
 
 
 def validate_class_result_evidence(result: dict, suite: dict) -> None:
@@ -399,23 +404,13 @@ def validate_class_result_evidence(result: dict, suite: dict) -> None:
         if "classEvidence" in result:
             fail("class-evidence-unexpected", "report.suites")
         return
-    evidence = fields(result.get("classEvidence"), "reference startedAt completedAt files", "classEvidence")
+    evidence = fields(result.get("classEvidence"), "reference inventoryDigest startedAt completedAt", "classEvidence")
     if evidence["reference"] != suite["class"]:
         fail("class-evidence-binding", "classEvidence")
+    if sha256(evidence["inventoryDigest"], "classEvidence.inventoryDigest") != digest(canonical(suite["classInventory"])):
+        fail("class-evidence-inventory", "classEvidence")
     if not 0 <= integer(evidence["startedAt"], "classEvidence.startedAt") <= integer(evidence["completedAt"], "classEvidence.completedAt"):
         fail("class-evidence-time", "classEvidence")
-    records = []
-    for item in array(evidence["files"], "classEvidence.files"):
-        fields(item, "path digest content", "classEvidence.files")
-        try:
-            raw = base64.b64decode(item["content"], validate=True)
-        except (ValueError, TypeError):
-            fail("class-evidence-content", "classEvidence.files")
-        if base64.b64encode(raw).decode("ascii") != item["content"] or digest(raw) != item["digest"]:
-            fail("class-evidence-digest", item["path"])
-        records.append({key: item[key] for key in ("path", "digest")})
-    if records != suite["classInventory"]:
-        fail("class-evidence-inventory", "classEvidence.files")
 
 
 @guarded

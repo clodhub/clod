@@ -65,6 +65,9 @@ def retained_manifests(root, policy):
     for ref in assembly["lock"]["packages"]:
         package_root = rooted(root, ".aepm/packages/" + ref["digest"])
         manifest = validate_component(load(package_root / "component.json"))
+        files = {item["path"] for item in snapshot(package_root) if item["kind"] == "file"}
+        if files != {item["path"] for item in manifest["files"]} | {"component.json"}:
+            fail("retained-membership", "packages")
         payloads = {item["path"]: rooted(package_root, item["path"]).read_bytes() for item in manifest["files"]}
         receipts = root / ".aepm/receipts" / ref["digest"]
         release, _ = verify((receipts / "release.dsse.json").read_bytes(), "release", Path(policy), RELEASE)
@@ -80,9 +83,6 @@ def retained_manifests(root, policy):
             fail("retained-source", "packages")
         from .foundations import validate_package_foundations
         validate_package_foundations(manifest, payloads)
-        files = {item["path"] for item in snapshot(package_root) if item["kind"] == "file"}
-        if files != set(payloads) | {"component.json"}:
-            fail("retained-membership", "packages")
         for item in manifest["files"]:
             validate_extracted_mode(rooted(package_root, item["path"]), item["executable"])
         manifests[ref["digest"]] = manifest

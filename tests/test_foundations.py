@@ -193,7 +193,9 @@ class FoundationTests(unittest.TestCase):
         shared = next(item for item in report["suites"] if item["id"].startswith("class:"))
         self.assertEqual((own["status"], shared["status"], report["summary"]["required-local"]), ("passed", "failed", "failed"))
         self.assertEqual(shared["package"], ref["digest"])
-        self.assertEqual(base64.b64decode(shared["classEvidence"]["files"][1]["content"]), CHECK)
+        inventory = self.manifest["classes"][0]["descriptor"]["inventory"]
+        self.assertEqual(shared["classEvidence"]["inventoryDigest"], digest(canonical(inventory)))
+        self.assertIn({"path": "classes/counter/check.py", "digest": digest(CHECK)}, inventory)
         with self.assertRaisesRegex(AepmError, "report-verdict"):
             publish_review(self.store, ref, report, self.root / "keys/guardian.pem", policy=policy)
 
@@ -208,49 +210,73 @@ class FoundationTests(unittest.TestCase):
         facts = maintenance_facts(ref, self.store, policy)
         self.assertEqual(facts["reportDigest"], digest(canonical(report)))
         self.assertRegex(facts["lastSuccessfulVerification"], r"^\d{4}-\d\d-\d\dT")
-        changed = deepcopy(report)
-        shared = next(item for item in changed["suites"] if "classEvidence" in item)
-        shared["classEvidence"]["files"][1]["content"] = base64.b64encode(b"assert True").decode()
-        with self.assertRaisesRegex(AepmError, "class-evidence-digest"):
-            publish_review(self.store, ref, changed, self.root / "keys/guardian.pem", policy=policy)
-        changed = deepcopy(report)
-        changed["suites"] = [item for item in changed["suites"] if "classEvidence" not in item]
-        with self.assertRaisesRegex(AepmError, "suite-coverage"):
-            publish_review(self.store, ref, changed, self.root / "keys/guardian.pem", policy=policy)
+        self.reject_class_evidence_changes(ref, report, policy)
 
-    def test_format_two_review_binds_large_inventory_content(self):
-        raw = canonical({"type": "counter", "description": "x" * 5000})
-        (self.source / "classes/counter/interface.json").write_bytes(raw)
+    def reject_class_evidence_changes(self, ref, report, policy):
+        def shared(value):
+            return next(item for item in value["suites"] if "classEvidence" in item)
+
+        def plain(value):
+            return next(item for item in value["suites"] if "classEvidence" not in item)
+
+        for code, change in (
+                ("class-evidence-inventory", lambda value: shared(value)["classEvidence"].update(inventoryDigest=digest(b"other inventory"))),
+                ("class-evidence-binding", lambda value: shared(value)["classEvidence"]["reference"].update(version="1.0.1")),
+                ("class-evidence-time", lambda value: shared(value)["classEvidence"].update(startedAt=shared(value)["classEvidence"]["completedAt"] + 1)),
+                ("invalid-fields", lambda value: shared(value)["classEvidence"].update(files=[])),
+                ("expected-object", lambda value: shared(value).pop("classEvidence")),
+                ("class-evidence-unexpected", lambda value: plain(value).update(classEvidence=deepcopy(shared(value)["classEvidence"]))),
+                ("suite-coverage", lambda value: value.update(suites=[item for item in value["suites"] if "classEvidence" not in item]))):
+            changed = deepcopy(report)
+            change(changed)
+            with self.subTest(code=code), self.assertRaisesRegex(AepmError, code):
+                publish_review(self.store, ref, changed, self.root / "keys/guardian.pem", policy=policy)
+
+    def test_report_size_is_independent_of_class_inventory_size(self):
+        """A class inventory of several megabytes run by many class suites keeps each signed record constant-size."""
         entry = self.manifest["classes"][0]
-        entry["descriptor"]["inventory"][0]["digest"] = digest(raw)
-        entry["reference"]["digest"] = digest(canonical(entry["descriptor"]))
+        descriptor = entry["descriptor"]
+        for index in range(48):
+            raw = canonical({"index": index, "text": "x" * 120000})
+            path = f"classes/counter/data/part-{index:02d}.json"
+            (self.source / path).parent.mkdir(parents=True, exist_ok=True)
+            (self.source / path).write_bytes(raw)
+            self.manifest["files"].append({"path": path, "executable": False})
+            descriptor["inventory"].append({"path": path, "digest": digest(raw)})
+        template = descriptor["verification"][0]
+        descriptor["verification"] = [{**deepcopy(template), "id": f"increment-{index}"} for index in range(6)]
+        entry["reference"]["digest"] = digest(canonical(descriptor))
+        self.manifest["implements"] = [entry["reference"]]
         self.manifest["format"] = 2
         for suite in self.manifest["verification"]:
             suite["execution"] = {"kind": "local", "simulation": False, "operations": [], "settings": [],
                                   "secrets": [], "resources": [], "assertions": [], "cleanup": None}
         self.save()
         ref = pack(self.source, self.store)
+        inventory_bytes = sum(len((self.source / item["path"]).read_bytes()) for item in descriptor["inventory"])
+        self.assertGreater(inventory_bytes, 5 * 1024 * 1024)
         policy = self.sign_for_review([ref])
         report = review_package(ref, self.store, policy, True)
-        self.assertEqual((report["format"], report["summary"]["required-local"]), (2, "passed"))
-        shared = next(item for item in report["suites"] if "classEvidence" in item)
-        self.assertGreater(len(shared["classEvidence"]["files"][0]["content"]), 4096)
+        self.assertEqual((report["format"], report["summary"]["required-local"]), (2, "passed"), report)
+        records = [item["classEvidence"] for item in report["suites"] if "classEvidence" in item]
+        self.assertEqual(len(records), 6)
+        self.assertTrue(all(len(canonical(record)) < 400 for record in records))
+        self.assertLess(len(canonical(report)), 8 * 1024)
+        # 112 class suites, as in the full OurPoker update, stay far below the 1 MiB report limit.
+        self.assertLess(112 * max(len(canonical(item)) for item in report["suites"]), 128 * 1024)
         publish_review(self.store, ref, report, self.root / "keys/guardian.pem", policy=policy)
         verify_package(ref, self.store, policy)
-        changed = deepcopy(report)
-        observed = next(item for item in changed["suites"] if "classEvidence" in item)
-        observed["classEvidence"]["files"][0]["content"] = base64.b64encode(b"y" * len(raw)).decode()
-        with self.assertRaisesRegex(AepmError, "class-evidence-digest"):
-            publish_review(self.store, ref, changed, self.root / "keys/guardian.pem", policy=policy)
-        changed = deepcopy(report)
-        next(item for item in changed["suites"] if "classEvidence" not in item)["reason"] = "x" * 5000
-        with self.assertRaisesRegex(AepmError, "invalid-string"):
-            publish_review(self.store, ref, changed, self.root / "keys/guardian.pem", policy=policy)
-        changed = deepcopy(report)
-        observed = next(item for item in changed["suites"] if "classEvidence" in item)
-        observed["classEvidence"]["files"][0]["content"] = "x" * (1024 * 1024)
-        with self.assertRaisesRegex(AepmError, "metadata-limit"):
-            publish_review(self.store, ref, changed, self.root / "keys/guardian.pem", policy=policy)
+        self.reject_class_evidence_changes(ref, report, policy)
+
+    def test_class_suite_records_only_bytes_matching_its_inventory(self):
+        from aepm.foundations import class_result_evidence, class_suites
+        suite = class_suites(self.manifest)[0]
+        record = class_result_evidence(suite, self.source, 10, 11)
+        self.assertEqual(record, {"reference": suite["class"], "inventoryDigest": digest(canonical(suite["classInventory"])),
+                                  "startedAt": 10, "completedAt": 11})
+        (self.source / "classes/counter/check.py").write_bytes(b"assert True\n")
+        with self.assertRaisesRegex(AepmError, "class-file-digest"):
+            class_result_evidence(suite, self.source, 10, 11)
 
     def test_class_identity_conflict_across_graph(self):
         other = counter(self.root / "other", "other")

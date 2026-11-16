@@ -164,6 +164,25 @@ class ApplicationTests(unittest.TestCase):
             with self.assertRaises(AepmError):
                 check_report(changed, assembly["lock"], digest(canonical(assembly)), manifests)
 
+    def test_retained_class_files_are_required_and_digest_bound(self):
+        """Class evidence names inventory digests; the bytes are the retained package files, checked before any report."""
+        assembly, manifests = retained_manifests(self.app, self.policy)
+        report = verify_application(self.app, self.policy, True)
+        check_report(report, assembly["lock"], digest(canonical(assembly)), manifests)
+        ref = next(item for item in assembly["lock"]["packages"] if item["name"] == "ourapps-ae/sample")
+        retained = self.app / ".aepm/packages" / ref["digest"] / "class-check.py"
+        original = retained.read_bytes()
+        for change, code in ((lambda: retained.write_bytes(b"assert True\n"), "retained-source"),
+                             (retained.unlink, "retained-membership")):
+            change()
+            with self.subTest(code=code), self.assertRaisesRegex(AepmError, code):
+                retained_manifests(self.app, self.policy)
+            with self.assertRaises(AepmError):
+                verify_application(self.app, self.policy, True)
+            retained.write_bytes(original)
+            retained.chmod(0o644)
+        retained_manifests(self.app, self.policy)
+
     def test_configuration_delimiters_types_and_single_pass(self):
         declaration = [{"id": "value", "type": "string", "grammar": "label", "required": True, "secret": False}]
         for value in ('bad"', "bad'", "bad$", "bad`", "bad\\", "bad\n", "{{other}}", "{{value}}", "bad{", "bad}"):

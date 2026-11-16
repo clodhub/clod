@@ -477,14 +477,7 @@ def validate_report_evidence(report: dict, binding: dict, context: str,
     if seen != expected.keys():
         fail("suite-coverage", "report.suites")
     if modern:
-        bounded_suites = []
-        for suite in report["suites"]:
-            if "classEvidence" in suite:
-                evidence = suite["classEvidence"]
-                suite = {**suite, "classEvidence": {**evidence, "files": [
-                    {**item, "content": item["digest"]} for item in evidence["files"]]}}
-            bounded_suites.append(suite)
-        execution_document({**report, "suites": bounded_suites}, "report")
+        execution_document(report, "report")
     summary = {scope: ("not-applicable" if not values else "failed" if "failed" in values else
                        "blocked" if "blocked" in values else "passed") for scope, values in statuses.items()}
     if report["summary"] != summary or summary["required-local"] != "passed":
