@@ -96,6 +96,13 @@ Styles use scope `none`, `scoped` or `global`. `none` has empty namespaces and c
 
 Maintenance has nonempty owners, contact and repository, and updates with a source and strategy `manual` or `release`. Verification dates are facts derived from validated signed review reports outside manifests. A manifest has no verification timestamp or self-referencing archive digest.
 
+## Dependency reuse
+
+- npm seeds, per run: cache content whose bytes match a package-lock SHA-512 integrity, copied into later checks' private npm caches. They save downloads, not disk space.
+- Swift seeds, per run: fresh bare repositories built from object files that `git fsck --full --strict` verifies, holding the pinned revision complete, with no hooks or configuration from the source.
+- Android SDK and Gradle home: one cloned private writable copy per check.
+- Gradle seeding is not implemented: Gradle needs its metadata stores, which no lock pins.
+
 ## Toolchains
 
 `toolchains` maps every declared platform, and only those, to the tools a machine needs to build that platform's outputs. A list may be empty. Test-suite `tools` pins remain separate. A complete declaration for a package supporting web, iOS and Android:

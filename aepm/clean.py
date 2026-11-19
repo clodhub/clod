@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -15,6 +16,8 @@ from .model import canonical, digest, fail
 
 TEMPORARY = re.compile(r"aepm-(?:verification|context|review)-.+")
 REMOVABLE_KINDS = ("check", "review", "install", "extract", "proof", "work")
+PLATFORM = sys.platform
+WINDOWS_OFF = "removal is off on Windows until open-file and process detection is verified there"
 
 
 def duration(value: str | None) -> int | None:
@@ -99,17 +102,24 @@ def _with_devices(entry: dict, root: Path) -> dict:
     return {**entry, "devices": devices or [{"kind": "unrecorded"}]}
 
 
-def _holds_devices(root: Path) -> bool:
-    """A check root that holds an emulator or simulator profile, or any device or room ownership record."""
-    protocol = root / "protocol"
-    for name in ("profiles/android", "profiles/apple", "android-user/avd"):
-        folder = protocol / name
+PROFILES = ("profiles/android", "profiles/apple", "android-user/avd")
+
+
+def _holds_profile(root: Path) -> bool:
+    """A check root holding an emulator or simulator profile; such a root is removed only by hand."""
+    for name in PROFILES:
+        folder = root / "protocol" / name
         try:
             if folder.is_dir() and any(folder.iterdir()):
                 return True
         except OSError:
             return True
-    ownership = protocol / "ownership"
+    return False
+
+
+def _holds_ownership(root: Path) -> bool:
+    """A check root holding a device or room ownership record."""
+    ownership = root / "protocol" / "ownership"
     try:
         return ownership.is_dir() and any(ownership.glob("*.json"))
     except OSError:
@@ -150,6 +160,70 @@ def _transaction_busy(stage: Path) -> bool:
     return (directory / "journal.json").exists() or (directory / "backup").exists() or (directory / "failed-new").exists()
 
 
+def open_paths() -> list[Path] | None:
+    """Resolved paths every process of this user has open, including working folders and executables; None when the
+    inspection fails or cannot see every such process."""
+    if PLATFORM == "darwin":
+        try:
+            result = subprocess.run(["lsof", "-nP", "-w", "-u", str(os.geteuid()), "-Fpn"], capture_output=True, timeout=120,
+                                    stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if result.returncode != 0 or not result.stdout:
+            return None
+        return [Path(line[1:].decode("utf-8", "surrogateescape")) for line in result.stdout.splitlines()
+                if line.startswith(b"n/")]
+    if PLATFORM.startswith("linux"):
+        paths = []
+        try:
+            entries = [entry for entry in os.scandir("/proc") if entry.name.isdecimal()]
+        except OSError:
+            return None
+        for entry in entries:
+            try:
+                if entry.stat().st_uid != os.geteuid():
+                    continue
+                names = [os.path.join(entry.path, "fd", name) for name in os.listdir(os.path.join(entry.path, "fd"))]
+                names += [os.path.join(entry.path, "cwd"), os.path.join(entry.path, "exe")]
+            except FileNotFoundError:
+                continue
+            except OSError:
+                return None
+            for name in names:
+                try:
+                    target = os.readlink(name)
+                except FileNotFoundError:
+                    continue
+                except OSError:
+                    return None
+                if target.startswith("/"):
+                    paths.append(Path(target.removesuffix(" (deleted)")))
+        return paths
+    return None
+
+
+def _held(path: Path, opened: list[Path]) -> bool:
+    resolved = path.resolve()
+    return any(item == resolved or item.is_relative_to(resolved) for item in opened)
+
+
+def _guard_open_files(candidates: list, protected: list) -> list:
+    """Move to protected every candidate in which a process of this user holds a file open; all of them when that
+    cannot be inspected."""
+    if not candidates:
+        return candidates
+    opened = open_paths()
+    kept = []
+    for item in candidates:
+        if opened is None:
+            protected.append({**item, "reason": "open-files-unknown"})
+        elif _held(Path(item["path"]), opened):
+            protected.append({**item, "reason": "open-files-inside"})
+        else:
+            kept.append(item)
+    return kept
+
+
 def survey(*, older_than: int | None = None) -> dict:
     """Removable candidates, protected roots with reasons, and unknown aepm temporaries. Nothing is changed."""
     from .ledger import entries
@@ -175,9 +249,11 @@ def survey(*, older_than: int | None = None) -> dict:
             protect("owner-alive")
         elif older_than is not None and now - entry.get("created", now) < older_than:
             protect("newer-than-limit")
-        elif (_holds_devices(root) or entry.get("retained") == "device-ownership") and not _devices_gone(_with_devices(entry, root)):
+        elif _holds_profile(root):
+            protect("device-profile-present")
+        elif (_holds_ownership(root) or entry.get("retained") == "device-ownership") and not _devices_gone(_with_devices(entry, root)):
             protect("devices-not-confirmed-gone")
-        elif entry["kind"] in ("check", "review", "install", "extract", "work") and (busy := _processes_inside(root)) is not False:
+        elif PLATFORM != "win32" and entry["kind"] in ("check", "review", "install", "extract", "work") and (busy := _processes_inside(root)) is not False:
             protect("processes-inside" if busy else "processes-unknown")
         elif entry["kind"] == "stage":
             if _transaction_busy(root):
@@ -205,7 +281,11 @@ def survey(*, older_than: int | None = None) -> dict:
     for path in sorted(temporary.iterdir()) if temporary.is_dir() else []:
         if TEMPORARY.fullmatch(path.name) and str(path.resolve()) not in known:
             unknown.append({"path": str(path.resolve()), "reason": "not-in-ledger"})
-    return {"candidates": candidates, "protected": protected, "unknown": unknown,
+    if PLATFORM == "win32":
+        return {"candidates": candidates, "protected": protected, "unknown": unknown, "removal": WINDOWS_OFF,
+                "bytes": sum(item["bytes"] for item in candidates)}
+    candidates = _guard_open_files(candidates, protected)
+    return {"candidates": candidates, "protected": protected, "unknown": unknown, "removal": "on",
             "bytes": sum(item["bytes"] for item in candidates)}
 
 
@@ -241,6 +321,8 @@ def clean(*, apply: bool = False, older_than: str | None = None) -> dict:
     if not apply:
         write_record(plan_path, {"format": 1, "created": int(time.time()), "olderThan": limit, "candidates": listing})
         return {**result, "applied": False, "plan": str(plan_path)}
+    if result["removal"] != "on":
+        fail("clean-removal-off", "clean", detail={"reason": result["removal"], "candidates": len(listing)})
     plan = read_record(plan_path)
     if not plan or plan.get("olderThan") != limit or plan.get("candidates") != listing:
         fail("clean-plan-changed", str(plan_path), detail={"planned": len(plan.get("candidates", [])) if plan else None,
@@ -255,6 +337,11 @@ def clean(*, apply: bool = False, older_than: str | None = None) -> dict:
         entry = entry_for(within or item["path"])
         if entry is None or digest(canonical(entry)) != item["entry"] or alive(entry):
             failed.append({**item, "error": "owner-or-entry-changed"})
+            continue
+        opened = open_paths()
+        if opened is None or _held(Path(item["path"]), opened) or (within is None and _processes_inside(Path(item["path"])) is not False
+                                                                    and entry["kind"] in ("check", "review", "install", "extract", "work")):
+            failed.append({**item, "error": "open-files-unknown" if opened is None else "in-use"})
             continue
         errors = []
         path = Path(item["path"])

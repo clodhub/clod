@@ -103,7 +103,7 @@ _GIT = {"usable": None}
 
 
 def _git(repository: Path, *arguments) -> str | None:
-    """git on a repository aepm created, with no system, global or repository hooks and an empty home."""
+    """git on a repository aepm created, reading neither system nor global configuration and running no hooks."""
     empty = Path(tempfile.gettempdir())
     environment = {"PATH": os.environ.get("PATH", os.defpath), "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
                    "HOME": str(empty), "GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C"}

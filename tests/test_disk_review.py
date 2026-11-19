@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -51,7 +52,18 @@ class CleanProtectionTests(StateTest):
         (profile / "config.ini").write_text("hw.ramSize=2048\n")
         candidates, protected, _ = self.survey()
         self.assertNotIn(str(root), candidates)
-        self.assertEqual(protected[str(root)], "devices-not-confirmed-gone")
+        self.assertEqual(protected[str(root)], "device-profile-present")
+
+    @POSIX
+    def test_a_profile_root_is_never_removed_even_when_its_devices_are_confirmed_gone(self):
+        root = self.dead_root("check-gone-devices", retained="device-ownership",
+                              devices=[{"kind": "apple-device", "requestedId": "aepm-a", "resourceId": "0000-gone"}])
+        (root / "protocol/profiles/apple").mkdir(parents=True)
+        (root / "protocol/profiles/apple/device.plist").write_text("profile")
+        with patch("aepm.clean._devices_gone", return_value=True):
+            candidates, protected, _ = self.survey()
+        self.assertNotIn(str(root), candidates)
+        self.assertEqual(protected[str(root)], "device-profile-present")
 
     @POSIX
     def test_killed_owner_root_with_device_intent_records_is_protected(self):
@@ -105,6 +117,95 @@ class CleanProtectionTests(StateTest):
         code, value = self.command("clean", "--apply")
         self.assertEqual((code, value["result"]["failed"]), (0, []), value)
         self.assertFalse(seeds.exists())
+
+
+class OpenFileTests(StateTest):
+    SLEEP = LedgerAndCleanTests.SLEEP
+    dead_root = LedgerAndCleanTests.dead_root
+    HOLD = "import sys, time\nstream = open(sys.argv[1], 'rb')\nprint('ready', flush=True)\ntime.sleep(60)\n"
+
+    def holder(self, path):
+        """A process whose working folder is outside `path`'s root and which holds `path` open."""
+        elsewhere = self.root / "elsewhere"
+        elsewhere.mkdir(exist_ok=True)
+        process = subprocess.Popen([sys.executable, "-B", "-c", self.HOLD, str(path)], cwd=elsewhere, stdout=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: process.poll() is None and process.kill())
+        self.assertEqual(process.stdout.readline().strip(), "ready")
+        return process
+
+    @POSIX
+    def test_a_file_held_open_from_outside_keeps_the_root_protected_at_listing_and_removal(self):
+        from aepm.clean import clean, survey
+        root = self.dead_root("check-open")
+        holder = self.holder(root / "data")
+        listed = survey()
+        self.assertNotIn(str(root), [item["path"] for item in listed["candidates"]])
+        self.assertEqual({item["path"]: item["reason"] for item in listed["protected"]}[str(root)], "open-files-inside")
+        holder.kill()
+        holder.wait()
+        clean()
+        from aepm import clean as module
+        real = module.open_paths
+        calls = []
+
+        def appears_after_listing():
+            # The apply step lists first (nothing open yet), then the holder opens the file before removal.
+            calls.append(1)
+            if len(calls) == 2:
+                holders.append(self.holder(root / "data"))
+            return real()
+
+        holders = []
+        with patch.object(module, "open_paths", side_effect=appears_after_listing):
+            removed = clean(apply=True)
+        holder = holders[0]
+        self.assertEqual([(item["path"], item["error"]) for item in removed["failed"]], [(str(root), "in-use")])
+        self.assertTrue(root.exists())
+        holder.kill()
+        holder.wait()
+        clean()
+        self.assertEqual([item["path"] for item in clean(apply=True)["removed"]], [str(root)])
+
+    @POSIX
+    def test_an_inspection_failure_protects_every_candidate(self):
+        from aepm import clean as module
+        first, second = self.dead_root("check-first"), self.dead_root("check-second")
+        with patch.object(module, "open_paths", return_value=None):
+            listed = module.survey()
+        self.assertEqual(listed["candidates"], [])
+        reasons = {item["path"]: item["reason"] for item in listed["protected"]}
+        self.assertEqual((reasons[str(first)], reasons[str(second)]), ("open-files-unknown", "open-files-unknown"))
+        module.clean()
+        with patch.object(module, "open_paths", side_effect=[[], None, None]):
+            removed = module.clean(apply=True)
+        self.assertEqual(sorted(item["error"] for item in removed["failed"]), ["open-files-unknown", "open-files-unknown"])
+        self.assertTrue(first.exists() and second.exists())
+
+    def test_open_file_inspection_fails_closed(self):
+        from types import SimpleNamespace
+        from aepm import clean as module
+        with patch.object(module, "PLATFORM", "darwin"), \
+                patch.object(module.subprocess, "run", return_value=SimpleNamespace(returncode=1, stdout=b"p1\nn/x\n")):
+            self.assertIsNone(module.open_paths())
+        with patch.object(module, "PLATFORM", "darwin"), patch.object(module.subprocess, "run", side_effect=OSError("no lsof")):
+            self.assertIsNone(module.open_paths())
+        with patch.object(module, "PLATFORM", "linux"), patch.object(module.os, "scandir", side_effect=PermissionError()):
+            self.assertIsNone(module.open_paths())
+        with patch.object(module, "PLATFORM", "win32"):
+            self.assertIsNone(module.open_paths())
+
+    @POSIX
+    def test_windows_lists_but_never_removes(self):
+        from aepm import clean as module
+        root = self.dead_root("check-windows")
+        with patch.object(module, "PLATFORM", "win32"):
+            code, value = self.command("clean")
+            self.assertEqual(code, 0)
+            self.assertIn(str(root), [item["path"] for item in value["result"]["candidates"]])
+            self.assertEqual(value["result"]["removal"], module.WINDOWS_OFF)
+            code, value = self.command("clean", "--apply")
+        self.assertEqual((code, value["error"]["code"]), (1, "clean-removal-off"))
+        self.assertTrue(root.exists())
 
 
 class FullVolumeAndCleanupTests(StateTest):
