@@ -34,8 +34,8 @@ class VerificationDirectory:
             self.temporary.cleanup()
 
 
-def fail(code: str, path: object) -> NoReturn:
-    raise AepmError(code, str(path))
+def fail(code: str, path: object, *, detail: dict | None = None) -> NoReturn:
+    raise AepmError(code, str(path), detail=detail)
 
 
 def fields(value, required, optional=(), path="document"):

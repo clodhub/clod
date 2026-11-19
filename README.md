@@ -11,6 +11,11 @@ python3 -m aepm bom DIGEST --store STORE --out NAME-VERSION.cdx.json
 python3 -m aepm fetch NAME@VERSION... --store STORE [--from https://ourapps.app] [--with-dependencies]
 python3 -m aepm questions RECIPE@VERSION --store STORE
 python3 -m aepm doctor RECIPE@VERSION --store STORE [--answers ANSWERS] [--install]
+python3 -m aepm space PATH [--need BYTES]
+python3 -m aepm locks
+python3 -m aepm lock KIND [--timeout SECONDS] [--purpose TEXT] -- COMMAND ...
+python3 -m aepm runs
+python3 -m aepm clean [--apply] [--older-than DURATION]
 python3 -m aepm design RECIPE@VERSION --store STORE [--answers ANSWERS] [--substitute SLOT=NAME@VERSION]... --out DEFINITION
 python3 -m aepm alternatives RECIPE@VERSION SLOT --store STORE [--from https://ourapps.app]
 python3 -m aepm resolve DEFINITION --catalogue STORE/catalogue.json --out LOCK
@@ -108,3 +113,12 @@ python3 -m aepm recover APP
 Run `python3 -m unittest discover -s tests` for local checks. The diagram renderer is vendored; consumers need no sibling checkout. Test modules for the POSIX private-process supervisor, version-manager shims and Darwin discovery skip on Windows. `python -B tests/run_update_cycle.py WORK` packs, reviews, installs and updates a fixture through the command line, then recovers an interrupted apply.
 
 For a dependency-free real package, run `AEPM_REVIEW_SOURCE=/absolute/package python3 -m unittest tests.test_packaged_review -v`. This packs the actual allowlist, creates disposable external identities, performs release-verified review and permits guardian acceptance only after required-local suites pass. Optional `AEPM_REVIEW_EVIDENCE=/absolute/report.json` retains the complete report.
+
+## Disk space, machine locks and cleanup
+
+aepm keeps per-user state in `AEPM_STATE_HOME`, by default `~/Library/Application Support/aepm` on macOS, `${XDG_STATE_HOME:-~/.local/state}/aepm` on Linux and `%LOCALAPPDATA%\aepm` on Windows. Errors may carry a `detail` object beside `code` and `path`.
+
+- `aepm.space.require_space(path, needed_bytes, *, purpose)` refuses with `insufficient-space` and `detail` `{path, purpose, required, free, margin, reserved}` unless the volume holding `path` has `needed_bytes` plus the margin free after other live processes' reservations. The margin is `AEPM_FREE_SPACE_MARGIN` bytes, default 10 GiB. `aepm.space.reserve(path, needed_bytes, *, purpose)` admits and holds those bytes for the length of a `with` block; two processes that fit alone but not together cannot both be admitted. A dead owner's reservation is ignored and removed. `tree_bytes(path)` measures allocated bytes without following links and refuses more than 2,000,000 entries. Out of space (`ENOSPC`, `EDQUOT`) is always `insufficient-space`. `aepm space PATH --need BYTES` prints the numbers and exits 1 when the bytes would not be admitted.
+- `aepm.locks.heavy(kind, *, purpose, timeout)` holds one machine-wide lock of kind `xcode`, `gradle`, `android-emulator` or `apple-simulator`, re-entrant within a thread. It uses `fcntl.flock` on macOS and Linux and `msvcrt.locking` on Windows, so a dead holder releases it at once. After `timeout` seconds it fails `resource-busy` with `detail.holder` `{pid, processStart, runId, kind, purpose, command, since}`, or null when the record belongs to a dead process. `aepm locks` lists holders; `aepm lock KIND -- COMMAND ...` runs a command under a lock and exits with its status. `aepm.locks.free_port()` picks an emulator console and adb port pair that is free; call it under the `android-emulator` lock.
+- `aepm.ledger.register(root, kind, *, purpose, keep)` records a root a caller owns (`kind` is `proof` or `work`; `keep` protects it from cleanup); `record` and `finish` do the same for roots aepm creates. Each entry holds the root, kind, purpose, run id, pid, process start, creation and end times, bytes at the end, retention reason and references. A root removed at its end drops its entry. `aepm runs` lists runs with their remaining roots.
+- `aepm clean` lists, without changing anything, ledgered roots whose owner is dead and that are not kept, a failed proposal's stage with no journal or backup beside it, and transaction check logs no recorded report names. It lists live, kept, pending, journalled and device-holding roots as protected, and `aepm-*` temporary folders missing from the ledger as unknown; neither is ever removed. Stores, recovery backups and journals are never candidates. `--apply` removes exactly the listed plan after rechecking every owner, refuses with `clean-plan-changed` if the listing changed, writes a cleanup log with each path, size and ledger entry, and exits 1 listing anything it could not remove. `--older-than` takes `30m`, `12h` or `7d`.

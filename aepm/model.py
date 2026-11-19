@@ -15,9 +15,15 @@ from typing import Any, NoReturn, NotRequired, TypedDict, cast
 
 
 class AepmError(Exception):
-    def __init__(self, code: str, path: str):
-        self.code, self.path = code, path
+    def __init__(self, code: str, path: str, *, detail: dict | None = None):
+        self.code, self.path, self.detail = code, path, detail
         super().__init__(f"{code}: {path}")
+
+    def document(self) -> dict:
+        value = {"code": self.code, "path": self.path}
+        if self.detail is not None:
+            value["detail"] = self.detail
+        return value
 
 
 class Requirement(TypedDict):
@@ -124,8 +130,8 @@ class Proposal(TypedDict):
     changes: list[dict[str, Any]]
 
 
-def fail(code: str, path: str) -> NoReturn:
-    raise AepmError(code, path)
+def fail(code: str, path: str, *, detail: dict | None = None) -> NoReturn:
+    raise AepmError(code, path, detail=detail)
 
 
 def guarded(function):
@@ -136,7 +142,12 @@ def guarded(function):
             return function(*args, **kwargs)
         except AepmError:
             raise
-        except (OSError, ValueError, TypeError, KeyError, OverflowError, RecursionError):
+        except OSError as error:
+            from .space import from_os_error, out_of_space
+            if out_of_space(error):
+                raise from_os_error(error, function.__name__) from error
+            fail("invalid-input", function.__name__)
+        except (ValueError, TypeError, KeyError, OverflowError, RecursionError):
             fail("invalid-input", function.__name__)
     return wrapped
 

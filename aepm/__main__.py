@@ -73,6 +73,19 @@ def parser():
     check.add_argument("--store", type=Path, required=True)
     check.add_argument("--answers", type=Path)
     check.add_argument("--install", action="store_true")
+    room = commands.add_parser("space")
+    room.add_argument("path", type=Path)
+    room.add_argument("--need", type=int, default=0)
+    commands.add_parser("locks")
+    hold = commands.add_parser("lock")
+    hold.add_argument("kind")
+    hold.add_argument("--timeout", type=float, default=3600)
+    hold.add_argument("--purpose", default="command")
+    hold.add_argument("argv", nargs="*")
+    commands.add_parser("runs")
+    tidy = commands.add_parser("clean")
+    tidy.add_argument("--apply", action="store_true")
+    tidy.add_argument("--older-than")
     ask = commands.add_parser("questions")
     ask.add_argument("recipe")
     ask.add_argument("--store", type=Path, required=True)
@@ -130,6 +143,37 @@ def dispatch(args):
             reasons = slot_fit(candidate, args.slot, candidate.filling[args.slot])
             result.append({"name": package_name, "version": package_version, "fits": not reasons, "reasons": reasons})
         return result
+    if command == "space":
+        from .space import free_bytes, margin, require_space, reserved_by_others
+        total = shutil.disk_usage(args.path if args.path.exists() else next(p for p in args.path.absolute().parents if p.exists())).total
+        value = {"path": str(args.path), "free": free_bytes(args.path), "total": total, "margin": margin(),
+                 "reserved": reserved_by_others(args.path), "need": args.need}
+        try:
+            require_space(args.path, args.need, purpose="space command")
+            value["ok"] = True
+        except AepmError as error:
+            if error.code != "insufficient-space":
+                raise
+            value["ok"] = False
+        return value
+    if command == "locks":
+        from .locks import holders
+        return holders()
+    if command == "lock":
+        from .locks import heavy
+        import subprocess
+        argv = args.argv[1:] if args.argv[:1] == ["--"] else args.argv
+        if not argv:
+            fail("arguments", "command")
+        with heavy(args.kind, purpose=args.purpose, timeout=args.timeout) as waited:
+            code = subprocess.run(argv).returncode
+        return {"kind": args.kind, "waitedSeconds": round(waited, 3), "exitCode": code}
+    if command == "runs":
+        from .ledger import runs
+        return runs()
+    if command == "clean":
+        from .clean import clean
+        return clean(apply=args.apply, older_than=args.older_than)
     if command == "doctor":
         from .doctor import Refused as DesignRefused, doctor
         answers = load(args.answers) if args.answers is not None else {}
@@ -229,10 +273,24 @@ def dispatch(args):
     return recover(Path(args.app))
 
 
+def args_command(argv):
+    values = list(sys.argv[1:] if argv is None else argv)
+    return str(values[0]) if values else "command"
+
+
 def main(argv=None):
     try:
         args = parser().parse_args(argv)
         result = dispatch(args)
+        if args.command == "space":
+            print(canonical({"ok": result["ok"], "result": result}).decode("utf-8"))
+            return int(not result["ok"])
+        if args.command == "lock":
+            print(canonical({"ok": result["exitCode"] == 0, "result": result}).decode("utf-8"))
+            return result["exitCode"] if 0 < result["exitCode"] < 256 else int(result["exitCode"] != 0)
+        if args.command == "clean" and result.get("failed"):
+            print(canonical({"ok": False, "result": result}).decode("utf-8"))
+            return 1
         if args.command == "doctor":
             healthy = all(tool["status"] == "ok" for tool in result["tools"])
             print(canonical({"ok": healthy, "result": result}).decode("utf-8"))
@@ -242,8 +300,12 @@ def main(argv=None):
     except Refused as refused:
         print(canonical({"ok": False, "errors": refused.errors}).decode("utf-8"))
     except AepmError as error:
-        print(canonical({"ok": False, "error": {"code": error.code, "path": error.path}}).decode("utf-8"))
-    except (OSError, ValueError, KeyError, TypeError):
+        print(canonical({"ok": False, "error": error.document()}).decode("utf-8"))
+    except OSError as error:
+        from .space import from_os_error, out_of_space
+        document = from_os_error(error, args_command(argv)).document() if out_of_space(error) else {"code": "invalid-input-or-filesystem", "path": "command"}
+        print(canonical({"ok": False, "error": document}).decode("utf-8"))
+    except (ValueError, KeyError, TypeError):
         print(canonical({"ok": False, "error": {"code": "invalid-input-or-filesystem", "path": "command"}}).decode("utf-8"))
     return 1
 
