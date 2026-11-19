@@ -176,6 +176,29 @@ class CheckSpaceTests(Base):
         self.assertFalse((self.root / "store/objects").exists())
 
 
+class UnauthorizedCheckTests(Base):
+    def test_an_unauthorized_check_needs_no_space(self):
+        from aepm.contextual import execute
+        class Execution:
+            context = {"resources": []}
+
+            def selection(self, suite):
+                raise AepmError("authorization-denied", "suite")
+
+            def prepare(self, suite, private):
+                raise AepmError("authorization-denied", "suite")
+
+            def check_time(self):
+                pass
+
+            authorization = None
+        suite = self.suite(execution={"kind": "native", "simulation": False, "operations": ["native-build"], "settings": [], "secrets": [],
+                                      "resources": [], "assertions": ["build-produced"], "cleanup": None}, tools={"java": "26"})
+        with patch("aepm.space.shutil.disk_usage", return_value=type("U", (), {"free": 10, "total": 10})()):
+            result, _ = execute(suite, self.package(), False, self.root / "logs", Execution())
+        self.assertEqual(result["reason"], "authorization-denied")
+
+
 class ReportFormatTests(Base):
     def test_reports_without_storage_and_lock_records_are_refused(self):
         from aepm.trust import validate_report_evidence

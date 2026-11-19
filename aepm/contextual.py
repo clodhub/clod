@@ -544,8 +544,14 @@ def execute(suite, source, allow_network, logs, execution, *, tool_selection=Non
     locks, space = [], None
     admitted = ExitStack()
     try:
-        admitted.enter_context(reserve(tempfile.gettempdir(), check_bytes(suite, source, copied_resources(suite, execution)),
-                                       purpose="check " + suite["id"]))
+        try:
+            execution.selection(suite)
+            authorized = True
+        except AepmError:
+            authorized = False  # an unauthorized check runs nothing; it fails below without needing space
+        if authorized:
+            admitted.enter_context(reserve(tempfile.gettempdir(), check_bytes(suite, source, copied_resources(suite, execution)),
+                                           purpose="check " + suite["id"]))
     except AepmError as error:
         if error.code != "insufficient-space":
             raise
