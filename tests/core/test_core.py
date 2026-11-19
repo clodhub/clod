@@ -112,7 +112,7 @@ class CoreTests(unittest.TestCase):
                    "status": "passed" if s["scope"] == "required-local" else "blocked",
                    "exitCode": 0 if s["scope"] == "required-local" else None,
                    "seconds": 0, "reason": "" if s["scope"] == "required-local" else "Tool unavailable",
-                   "logDigest": digest(b"")}
+                   "logDigest": digest(b""), "storage": {"writtenBytes": 0, "keptBytes": 0}, "locks": []}
                   for s in binding["suites"]]
         from aepm.foundations import class_result_evidence
         for result, suite in zip(suites, binding["suites"]):

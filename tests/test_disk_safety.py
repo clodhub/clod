@@ -176,6 +176,79 @@ class LockTests(StateTest):
             with heavy("disk", purpose="unknown", timeout=1):
                 pass
 
+    PROBE = ("from aepm.locks import heavy\ntry:\n    with heavy('gradle', purpose='other process', timeout=0.3):\n"
+             "        print('acquired')\nexcept Exception as error:\n    print(error.code)\n")
+
+    def other_process(self):
+        """What a second process gets when it asks for the gradle lock with a short timeout."""
+        return self.child(self.PROBE).communicate(timeout=30)[0].strip()
+
+    def assert_free_everywhere(self):
+        from aepm.locks import _HELD, holders
+        self.assertNotIn("gradle", _HELD)
+        self.assertFalse(next(item for item in holders() if item["kind"] == "gradle")["held"])
+        self.assertEqual(self.other_process(), "acquired")
+
+    def test_inner_hold_that_outlives_the_outer_keeps_the_lock(self):
+        from contextlib import ExitStack
+        from aepm.locks import heavy
+        inner = ExitStack()
+        with heavy("gradle", purpose="outer", timeout=1):
+            inner.enter_context(heavy("gradle", purpose="inner", timeout=1))
+        self.assertEqual(self.other_process(), "resource-busy")
+        inner.close()
+        self.assert_free_everywhere()
+
+    def test_nested_holds_release_only_when_the_last_exits(self):
+        from aepm.locks import heavy
+        with heavy("gradle", purpose="outer", timeout=1):
+            with heavy("gradle", purpose="middle", timeout=1):
+                with heavy("gradle", purpose="inner", timeout=1):
+                    self.assertEqual(self.other_process(), "resource-busy")
+                self.assertEqual(self.other_process(), "resource-busy")
+            self.assertEqual(self.other_process(), "resource-busy")
+        self.assert_free_everywhere()
+
+    def test_errors_and_cancellation_in_inner_or_outer_block_release_once(self):
+        from contextlib import ExitStack
+        from aepm.locks import heavy
+        for error in (RuntimeError("check failed"), KeyboardInterrupt()):
+            with self.subTest(error=type(error).__name__, place="inner"):
+                with self.assertRaises(type(error)):
+                    with heavy("gradle", purpose="outer", timeout=1):
+                        try:
+                            with heavy("gradle", purpose="inner", timeout=1):
+                                raise error
+                        finally:
+                            self.assertEqual(self.other_process(), "resource-busy")
+                self.assert_free_everywhere()
+            with self.subTest(error=type(error).__name__, place="outer with outliving inner"):
+                inner = ExitStack()
+                with self.assertRaises(type(error)):
+                    with heavy("gradle", purpose="outer", timeout=1):
+                        inner.enter_context(heavy("gradle", purpose="inner", timeout=1))
+                        raise error
+                self.assertEqual(self.other_process(), "resource-busy")
+                inner.close()
+                self.assert_free_everywhere()
+
+    def test_second_process_waits_for_the_final_holder_then_gets_the_lock(self):
+        from contextlib import ExitStack
+        from aepm.locks import heavy
+        waiting = self.child("import time\nfrom aepm.locks import heavy\nstarted = time.monotonic()\n"
+                             "with heavy('gradle', purpose='waiting process', timeout=30) as waited:\n"
+                             "    print('acquired', round(waited, 1), flush=True)\n")
+        inner = ExitStack()
+        with heavy("gradle", purpose="outer", timeout=1):
+            inner.enter_context(heavy("gradle", purpose="inner", timeout=1))
+            time.sleep(0.5)
+        time.sleep(1.0)
+        self.assertIsNone(waiting.poll(), "the second process got the lock before the final holder exited")
+        inner.close()
+        output = waiting.communicate(timeout=30)[0].split()
+        self.assertEqual(output[0], "acquired")
+        self.assertGreaterEqual(float(output[1]), 1.0)
+
     def test_lock_command_runs_and_returns_the_exit_code(self):
         code, value = self.command("lock", "gradle", "--timeout", 5, "--", sys.executable, "-c", "raise SystemExit(3)")
         self.assertEqual((code, value["result"]["exitCode"]), (3, 3))

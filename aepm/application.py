@@ -304,6 +304,12 @@ def validate_retained_assembly(root, assembly, manifests):
         fail("assembly-design", "design")
 
 
+def install_bytes(lock, store: Path) -> int:
+    """An installed application holds each archive, its extracted files and its installed artefacts: three times the
+    archive bytes bounds all three."""
+    return 3 * sum((Path(store) / "objects" / (ref["digest"] + ".tar")).stat().st_size for ref in lock["packages"])
+
+
 @guarded
 def assemble(definition: Definition, lock: Lock, store: Path, destination: Path, policy: Path) -> Assembly:
     from .bundle import extract, resolve, read_package
@@ -318,7 +324,13 @@ def assemble(definition: Definition, lock: Lock, store: Path, destination: Path,
     destination = Path(destination).absolute()
     if destination.exists() or linked(destination) or not destination.parent.is_dir() or linked(destination.parent):
         fail("target-exists", "target")
-    with tempfile.TemporaryDirectory(prefix=".aepm-assembly-", dir=destination.parent) as temporary:
+    from .ledger import tracked
+    from .space import require_space, reserve
+    needed = install_bytes(lock, Path(store))
+    require_space(destination.parent, needed, purpose="install " + definition["id"])
+    holder = tempfile.TemporaryDirectory(prefix=".aepm-assembly-", dir=destination.parent)
+    with tracked(holder.name, "install", purpose="install " + definition["id"]), holder as temporary, \
+            reserve(destination.parent, needed, purpose="install " + definition["id"]):
         root = Path(temporary) / "application"
         root.mkdir()
         owned, effective, definitions, instances = [], {}, [], []

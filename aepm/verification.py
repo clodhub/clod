@@ -139,10 +139,17 @@ def execution_environment(home, tools, *, tool_selection=None):
             "TMPDIR": str(home), "XDG_CACHE_HOME": str(home / "cache"), "XDG_CONFIG_HOME": str(home / "config"),
             "npm_config_cache": str(home / "npm"), "npm_config_userconfig": str(home / "npmrc"),
             "GRADLE_USER_HOME": str(home / "gradle"), "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8",
-            "CI": "true", "PYTHONDONTWRITEBYTECODE": "1"}
+            "CI": "true", "PYTHONDONTWRITEBYTECODE": "1", **apple_home(home)}
     if tool_selection is not None:
         check_links(home, tools, tool_selection)
     return environment
+
+
+def apple_home(home):
+    """On macOS, Xcode, SwiftPM and other Foundation tools find their home through CFFIXED_USER_HOME, not HOME; without
+    it DerivedData and package caches land in the user's real Library."""
+    import sys
+    return {"CFFIXED_USER_HOME": str(home)} if sys.platform == "darwin" else {}
 
 
 def check_links(home, tools, tool_selection):
@@ -162,11 +169,56 @@ def host_command(argv, cwd, tools, environment):
         return None
 
 
+def check_bytes(suite, source, resources=()) -> int:
+    """Bytes a check may write: its measured copied inputs plus fallbacks only where no inventory gives a size."""
+    from .locks import kinds_for
+    from .space import ANDROID_MEDIA_CHECK, APPLE_DESIGN_BUILD, NPM_INSTALL, tree_bytes
+    needed = tree_bytes(source) if source is not None else 0
+    needed += sum(resource_bytes(item) for item in resources)
+    steps = [*suite.get("prepare", []), {"argv": suite["argv"]}]
+    needed += NPM_INSTALL * sum(1 for step in steps if step["argv"][:1] == ["npm"] and step["argv"][1:2] in (["ci"], ["install"]))
+    kinds = kinds_for(suite)
+    if "gradle" in kinds:
+        needed += ANDROID_MEDIA_CHECK
+    if "xcode" in kinds and suite.get("root") == "application":
+        needed += APPLE_DESIGN_BUILD
+    return needed
+
+
+def resource_bytes(resource) -> int:
+    """The recorded size of a copied resource; an uncopied (read-only) resource adds nothing."""
+    from .space import tree_bytes
+    return tree_bytes(resource["path"])
+
+
+def low_space(path) -> bool:
+    from .space import free_bytes, margin
+    try:
+        return free_bytes(path) < margin()
+    except OSError:
+        return False
+
+
+def stopped_result(suite, space, logs):
+    evidence = canonical([{"step": "validation-inputs", "preparation": True, "seconds": 0, "exitCode": None,
+                           "reason": "insufficient-space", "suppressed": True}])
+    logs.mkdir(parents=True, exist_ok=True)
+    immutable_blob(logs / (digest(evidence) + ".json"), evidence)
+    return {"package": suite["package"], "id": suite["id"], "scope": suite["scope"], "status": "blocked", "exitCode": None,
+            "seconds": 0, "reason": "insufficient-space", "logDigest": digest(evidence),
+            "storage": {"writtenBytes": 0, "keptBytes": 0}, "locks": [], "space": dict(space)}
+
+
 def execute_suite(suite, source, allow_network, logs, *, tool_selection=None, adoption_root=None):
+    from contextlib import ExitStack
+    from .copying import copy_tree
+    from .locks import heavy, kinds_for
+    from .model import AepmError
+    from .space import from_os_error, out_of_space, reserve
     tool_selection = require_selection(tool_selection)
     adoption = {} if adoption_root is None else {"adoption_root": adoption_root}
     status, code, reason, seconds = "blocked", None, "", 0
-    events = []
+    events, locks, storage, space = [], [], {"writtenBytes": 0, "keptBytes": 0}, None
     output_remaining = OUTPUT_LIMIT
     if suite["requirements"]:
         reason = "external-prerequisites-unavailable:" + ",".join(sorted(suite["requirements"]))
@@ -175,98 +227,141 @@ def execute_suite(suite, source, allow_network, logs, *, tool_selection=None, ad
     elif suite["network"] and not allow_network:
         reason = "network-not-authorized"
     if not reason:
-        workspace = VerificationDirectory(prefix="aepm-verification-")
-        with workspace as directory:
-            private = Path(directory).resolve()
-            snapshot(source)
-            shutil.copytree(source, private / "root")
-            root = private / "root"
-            environment = execution_environment(private / "home", suite["tools"], tool_selection=tool_selection)
-            if environment is None:
-                reason = "tool-unavailable"
-            if environment is not None:
-                if "class" in suite:
-                    from .foundations import module_sources
-                    manifest = load(root / "component.json")
-                    environment.update(AEPM_CANDIDATE_ROOT=str(root), AEPM_CANDIDATE_MANIFEST=str(root / "component.json"),
-                                       AEPM_CANDIDATE_DIGEST=suite["package"], AEPM_CLASS_DIGEST=suite["class"]["digest"],
-                                       AEPM_MODULE_MAP=canonical(module_sources(manifest, root)).decode())
-                for name, expected_version in suite["tools"].items():
-                    version_flag = "-version" if name in ("java", "javac", "swift", "xcodebuild", "kotlinc") else "--version"
-                    if tool_selection is not None:
-                        check_links(private / "home", suite["tools"], tool_selection)
-                    probe = host_command([name, version_flag], root, suite["tools"], environment)
-                    if probe is None:
+        temporary = tempfile.gettempdir()
+        admitted = ExitStack()
+        try:
+            admitted.enter_context(reserve(temporary, check_bytes(suite, source), purpose="check " + suite["id"]))
+        except AepmError as error:
+            if error.code != "insufficient-space":
+                raise
+            status, reason, space = "blocked", "insufficient-space", error.detail
+    if not reason:
+        with admitted:
+            workspace = VerificationDirectory(prefix="aepm-verification-", purpose="check " + suite["id"])
+            with workspace as directory:
+                private = Path(directory).resolve()
+                try:
+                    snapshot(source)
+                    copy_tree(source, private / "root")
+                    root = private / "root"
+                    environment = execution_environment(private / "home", suite["tools"], tool_selection=tool_selection)
+                    if environment is None:
                         reason = "tool-unavailable"
-                        break
-                    tool_code, _, tool_reason, version_output = run(probe, root, environment, 10, 65536)
-                    if tool_reason == "cleanup-failed":
-                        workspace.preserve = True
-                        status, reason = "failed", "cleanup-failed"
-                        break
-                    if tool_code != 0 or tool_reason:
-                        reason = "tool-version-unavailable"
-                        break
-                    from .host_tools import version_matches
-                    if version_matches(version_output.decode("utf-8", errors="replace"), expected_version) is None:
-                        reason = "tool-version-mismatch"
-                        break
-            for name in [*suite["fixtures"], *suite["locks"]]:
-                if not rooted(root, name).exists():
-                    fail("verification-input", name)
-            steps = [*suite["prepare"], {"argv": suite["argv"], "cwd": suite["cwd"], "network": suite["network"]}]
-            for index, step in enumerate(steps):
-                if reason:
-                    break
-                if step["network"] and not allow_network:
-                    reason = "preparation-network-not-authorized"
-                    break
-                cwd = rooted(root, step["cwd"], dot=True)
-                if not cwd.is_dir():
-                    fail("verification-cwd", "verification")
-                argv = list(step["argv"])
-                if "/" in argv[0]:
-                    executable = rooted(cwd, argv[0][2:] if argv[0].startswith("./") else argv[0])
-                    if not executable.is_file():
-                        reason = "tool-unavailable"
-                        break
-                    argv[0] = str(executable)
-                elif argv[0] not in suite["tools"]:
-                    reason = "undeclared-tool"
-                    break
-                else:
-                    argv = host_command(argv, cwd, suite["tools"], environment)
-                    if argv is None:
-                        reason = "tool-unavailable"
-                        break
-                if tool_selection is not None:
-                    check_links(private / "home", suite["tools"], tool_selection)
-                code, duration, failure, output = run(argv, cwd, environment, suite["timeoutSeconds"], output_remaining, **adoption)
-                if failure == "cleanup-failed":
-                    workspace.preserve = True
-                output_remaining -= len(output)
-                seconds += duration
-                # Only scrubbed-environment output is retained; no real credentials are supplied.
-                log_digest = digest(output)
-                logs.mkdir(parents=True, exist_ok=True)
-                immutable_blob(logs / (log_digest + ".log"), output)
-                events.append({"step": index, "preparation": index < len(steps) - 1,
-                               "seconds": duration, "exitCode": code, "reason": failure, "logDigest": log_digest})
-                if failure or code != 0:
-                    reason = failure or ("preparation-failed" if index < len(steps) - 1 else "nonzero-exit")
-                    status = "failed" if index == len(steps) - 1 or failure == "cleanup-failed" else "blocked"
-                    break
-            else:
-                status = "passed"
-            if workspace.preserve:
-                events.append({"step": "retained-private-root", "preparation": False, "seconds": 0,
-                               "exitCode": None, "reason": "cleanup-failed", "path": str(private)})
+                    if environment is not None:
+                        if "class" in suite:
+                            from .foundations import module_sources
+                            manifest = load(root / "component.json")
+                            environment.update(AEPM_CANDIDATE_ROOT=str(root), AEPM_CANDIDATE_MANIFEST=str(root / "component.json"),
+                                               AEPM_CANDIDATE_DIGEST=suite["package"], AEPM_CLASS_DIGEST=suite["class"]["digest"],
+                                               AEPM_MODULE_MAP=canonical(module_sources(manifest, root)).decode())
+                        from .seeds import seed_check
+                        seed_check(root, environment)
+                        for name, expected_version in suite["tools"].items():
+                            version_flag = "-version" if name in ("java", "javac", "swift", "xcodebuild", "kotlinc") else "--version"
+                            if tool_selection is not None:
+                                check_links(private / "home", suite["tools"], tool_selection)
+                            probe = host_command([name, version_flag], root, suite["tools"], environment)
+                            if probe is None:
+                                reason = "tool-unavailable"
+                                break
+                            tool_code, _, tool_reason, version_output = run(probe, root, environment, 10, 65536)
+                            if tool_reason == "cleanup-failed":
+                                workspace.preserve = True
+                                status, reason = "failed", "cleanup-failed"
+                                break
+                            if tool_code != 0 or tool_reason:
+                                reason = "tool-version-unavailable"
+                                break
+                            from .host_tools import version_matches
+                            if version_matches(version_output.decode("utf-8", errors="replace"), expected_version) is None:
+                                reason = "tool-version-mismatch"
+                                break
+                    for name in [*suite["fixtures"], *suite["locks"]]:
+                        if not rooted(root, name).exists():
+                            fail("verification-input", name)
+                    steps = [*suite["prepare"], {"argv": suite["argv"], "cwd": suite["cwd"], "network": suite["network"]}]
+                    held = ExitStack()
+                    with held:
+                        if not reason:
+                            for kind in kinds_for(suite):
+                                waited = held.enter_context(heavy(kind, purpose="check " + suite["id"]))
+                                locks.append({"kind": kind, "waitedMilliseconds": round(waited * 1000)})
+                                if kind == "android-emulator":
+                                    from .locks import free_port
+                                    environment["AEPM_EMULATOR_PORT"] = str(free_port())
+                        for index, step in enumerate(steps):
+                            if reason:
+                                break
+                            if step["network"] and not allow_network:
+                                reason = "preparation-network-not-authorized"
+                                break
+                            cwd = rooted(root, step["cwd"], dot=True)
+                            if not cwd.is_dir():
+                                fail("verification-cwd", "verification")
+                            argv = list(step["argv"])
+                            if "/" in argv[0]:
+                                executable = rooted(cwd, argv[0][2:] if argv[0].startswith("./") else argv[0])
+                                if not executable.is_file():
+                                    reason = "tool-unavailable"
+                                    break
+                                argv[0] = str(executable)
+                            elif argv[0] not in suite["tools"]:
+                                reason = "undeclared-tool"
+                                break
+                            else:
+                                argv = host_command(argv, cwd, suite["tools"], environment)
+                                if argv is None:
+                                    reason = "tool-unavailable"
+                                    break
+                            if tool_selection is not None:
+                                check_links(private / "home", suite["tools"], tool_selection)
+                            code, duration, failure, output = run(argv, cwd, environment, suite["timeoutSeconds"], output_remaining, **adoption)
+                            if failure == "cleanup-failed":
+                                workspace.preserve = True
+                            output_remaining -= len(output)
+                            seconds += duration
+                            # Only scrubbed-environment output is retained; no real credentials are supplied.
+                            log_digest = digest(output)
+                            logs.mkdir(parents=True, exist_ok=True)
+                            immutable_blob(logs / (log_digest + ".log"), output)
+                            events.append({"step": index, "preparation": index < len(steps) - 1,
+                                           "seconds": duration, "exitCode": code, "reason": failure, "logDigest": log_digest})
+                            if failure or code != 0:
+                                if not failure and low_space(private):
+                                    from .space import insufficient, free_bytes
+                                    space = insufficient(private, "check " + suite["id"], None, free_bytes(private)).detail
+                                    reason, status = "insufficient-space", "failed"
+                                    break
+                                reason = failure or ("preparation-failed" if index < len(steps) - 1 else "nonzero-exit")
+                                status = "failed" if index == len(steps) - 1 or failure == "cleanup-failed" else "blocked"
+                                break
+                        else:
+                            status = "passed"
+                    if not workspace.preserve and status == "passed":
+                        from .seeds import harvest_check
+                        harvest_check(root, environment)
+                except (OSError, AepmError) as error:
+                    if isinstance(error, OSError) and not out_of_space(error):
+                        raise
+                    if isinstance(error, AepmError) and error.code != "insufficient-space":
+                        raise
+                    detail = (from_os_error(error, "check " + suite["id"]) if isinstance(error, OSError) else error).detail
+                    workspace.preserve = False
+                    status, reason, space = "failed", "insufficient-space", detail
+                if workspace.preserve:
+                    workspace.retained = "cleanup-failed"
+                    events.append({"step": "retained-private-root", "preparation": False, "seconds": 0,
+                                   "exitCode": None, "reason": "cleanup-failed", "path": str(private)})
+            storage = {"writtenBytes": workspace.written, "keptBytes": workspace.kept}
     evidence = canonical(events)
     log_digest = digest(evidence)
     logs.mkdir(parents=True, exist_ok=True)
     immutable_blob(logs / (log_digest + ".json"), evidence)
-    return {"package": suite["package"], "id": suite["id"], "scope": suite["scope"], "status": status,
-            "exitCode": code, "seconds": seconds, "reason": reason, "logDigest": log_digest}
+    result = {"package": suite["package"], "id": suite["id"], "scope": suite["scope"], "status": status,
+              "exitCode": code, "seconds": seconds, "reason": reason, "logDigest": log_digest, "storage": storage, "locks": locks}
+    if space is not None:
+        result["space"] = space
+    return result
 
 
 def make_report(lock, assembly_digest, manifests, roots, application_root, policy, trusted, allow_network, context, logs, *,
@@ -290,10 +385,15 @@ def make_report(lock, assembly_digest, manifests, roots, application_root, polic
                           forbidden_roots=[*roots.values(), logs.parent, *([application_root] if application_root else [])],
                           **execution_options) if use_context else None
     results, records = [], []
+    exhausted = None
     for suite in suites:
         suite_started = clock()
         source = roots[suite["package"]] if suite["root"] == "package" else application_root
-        if "execution" in suite:
+        if exhausted is not None:
+            # A volume that ran out stops the remaining checks; each is recorded with the numbers that stopped them.
+            result = stopped_result(suite, exhausted, logs)
+            record = evidence_record(suite)
+        elif "execution" in suite:
             result, record = execute(suite, source, allow_network, logs, execution, tool_selection=tool_selection, **adoption)
         else:
             started = clock()
@@ -306,6 +406,8 @@ def make_report(lock, assembly_digest, manifests, roots, application_root, polic
             for prerequisite in record["prerequisites"]:
                 prerequisite["reason"] = "unsupported-prerequisite"
         results.append(result)
+        if result["reason"] == "insufficient-space" and exhausted is None:
+            exhausted = result["space"]
         if "class" in suite:
             from .foundations import class_result_evidence
             result["classEvidence"] = class_result_evidence(suite, source, suite_started, clock())
@@ -358,7 +460,9 @@ def review_package(ref, store: Path, policy: Path, trusted: bool, *, allow_netwo
     lock = resolve([{key: ref[key] for key in ("name", "version")}], store / "catalogue.json",
                    "review/" + ref["name"], digest(canonical(manifest)))
     refs = [{key: item[key] for key in ("name", "version", "digest")} for item in lock["packages"]]
-    with tempfile.TemporaryDirectory(prefix="aepm-review-") as directory:
+    from .ledger import tracked
+    holder = tempfile.TemporaryDirectory(prefix="aepm-review-")
+    with tracked(holder.name, "review", purpose="review " + ref["name"]), holder as directory:
         roots, manifests = {}, {}
         for item in refs:
             root = Path(directory).resolve() / item["digest"]

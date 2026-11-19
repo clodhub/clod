@@ -90,7 +90,8 @@ class ExecutionEvidenceTests(unittest.TestCase):
                 record["resources"] = [{"id": name, "digest": "a" * 64 if started else None} for name in ("androidJavaHome", "androidSdk")]
             self.evidence["suites"].append(record)
             results.append({"package": self.ref["digest"], "id": suite["id"], "scope": suite["scope"], "status": "passed" if started else "blocked",
-                             "exitCode": 0 if started else None, "seconds": 1, "reason": "" if started else "context-missing", "logDigest": digest(b"")})
+                             "exitCode": 0 if started else None, "seconds": 1, "reason": "" if started else "context-missing", "logDigest": digest(b""),
+                            "storage": {"writtenBytes": 0, "keptBytes": 0}, "locks": []})
             if "class" in suite:
                 from aepm.foundations import class_result_evidence
                 results[-1]["classEvidence"] = class_result_evidence(suite, self.source, 1002, 1003)

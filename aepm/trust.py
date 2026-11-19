@@ -454,7 +454,10 @@ def validate_report_evidence(report: dict, binding: dict, context: str,
     seen = set()
     statuses = {scope: [] for scope in SCOPES}
     for suite in array(report["suites"], "report.suites"):
-        fields(suite, "package id scope status exitCode seconds reason logDigest", "report.suites", "classEvidence")
+        if not {"storage", "locks"} <= set(suite) if isinstance(suite, dict) else False:
+            fail("report-format-outdated", "report.suites")
+        fields(suite, "package id scope status exitCode seconds reason logDigest storage locks", "report.suites", "classEvidence space")
+        validate_suite_resources(suite)
         text(suite["package"], "report.suites.package")
         text(suite["id"], "report.suites.id")
         key = (suite["package"], suite["id"])
@@ -486,6 +489,38 @@ def validate_report_evidence(report: dict, binding: dict, context: str,
         _validate_execution_evidence(report, binding, evidence_root, policy, adoption,
                                      int(time.time()) if now is None else integer(now, "now"))
     return report
+
+
+def validate_suite_resources(suite: dict) -> None:
+    """A check result's disk and lock evidence: bytes its private root held at the end and kept, the machine locks
+    it held with the milliseconds it waited, and, for an out-of-space result, the admission numbers."""
+    storage = fields(suite["storage"], "writtenBytes keptBytes", "report.suites.storage")
+    for key in ("writtenBytes", "keptBytes"):
+        if integer(storage[key], "report.suites.storage." + key) < 0:
+            fail("suite-result", "report.suites.storage")
+    if storage["keptBytes"] not in (0, storage["writtenBytes"]):
+        fail("suite-result", "report.suites.storage")
+    kinds = []
+    for item in array(suite["locks"], "report.suites.locks"):
+        fields(item, "kind waitedMilliseconds", "report.suites.locks")
+        choice(item["kind"], ("xcode", "gradle", "android-emulator", "apple-simulator"), "report.suites.locks.kind")
+        if integer(item["waitedMilliseconds"], "report.suites.locks.waitedMilliseconds") < 0:
+            fail("suite-result", "report.suites.locks")
+        kinds.append(item["kind"])
+    if len(kinds) != len(set(kinds)):
+        fail("suite-result", "report.suites.locks")
+    if ("space" in suite) != (suite["reason"] == "insufficient-space"):
+        fail("suite-result", "report.suites.space")
+    if "space" in suite:
+        space = fields(suite["space"], "path purpose required free margin reserved", "report.suites.space")
+        bounded_text(space["path"], "report.suites.space.path", 4096, empty=True)
+        bounded_text(space["purpose"], "report.suites.space.purpose", 256)
+        for key in ("required", "free"):
+            if space[key] is not None and integer(space[key], "report.suites.space." + key) < 0:
+                fail("suite-result", "report.suites.space")
+        for key in ("margin", "reserved"):
+            if integer(space[key], "report.suites.space." + key) < 0:
+                fail("suite-result", "report.suites.space")
 
 
 def retained_authorization(root, identifier, policy):

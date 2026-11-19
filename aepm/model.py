@@ -674,7 +674,7 @@ OPERATION_ASSERTIONS = {
 }
 NATIVE_ASSERTIONS = set("camera-selection capture-permission sound-callback late-join-ignored retry-after-failure preferences-preserved scope-released".split())
 EXECUTION_ASSERTIONS = set.union(*OPERATION_ASSERTIONS.values(), NATIVE_ASSERTIONS, {"room-listed", "private-cards-hidden", "participant-mapping"})
-EXECUTION_REASONS = frozenset([""] + "context-missing context-invalid context-missing-setting secret-unavailable authorization-missing authorization-denied authorization-not-yet-valid authorization-expired execution-replayed unsupported-prerequisite host-unavailable tool-unavailable tool-version-mismatch discovery-timeout private-destination-unsupported resource-missing resource-changed resource-copy-mismatch network-not-authorized simulation-not-live preparation-failed assertion-failed result-missing result-invalid timeout output-limit process-failed cleanup-failed windows-containment-unavailable unsupported-filesystem".split())
+EXECUTION_REASONS = frozenset([""] + "insufficient-space resource-busy context-missing context-invalid context-missing-setting secret-unavailable authorization-missing authorization-denied authorization-not-yet-valid authorization-expired execution-replayed unsupported-prerequisite host-unavailable tool-unavailable tool-version-mismatch discovery-timeout private-destination-unsupported resource-missing resource-changed resource-copy-mismatch network-not-authorized simulation-not-live preparation-failed assertion-failed result-missing result-invalid timeout output-limit process-failed cleanup-failed windows-containment-unavailable unsupported-filesystem".split())
 
 
 def bounded_text(value: object, path: str, maximum: int = 256, *, empty: bool = False) -> str:

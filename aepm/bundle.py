@@ -125,7 +125,10 @@ def atomic_write(path: Path, data: bytes) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
-    except OSError:
+    except OSError as error:
+        from .space import from_os_error, out_of_space
+        if out_of_space(error):
+            raise from_os_error(error, "write", path) from error
         fail("write-failed", str(path))
     finally:
         if temporary is not None:
@@ -227,7 +230,13 @@ def add_archive(store: Path, ref: PackageRef, data: bytes) -> Component:
 
 
 def _publish_archive(ref: PackageRef, store: Path, data: bytes) -> None:
+    from .space import reserve
     catalogue = store / "catalogue.json"
+    with reserve(store, len(data) + (catalogue.stat().st_size if catalogue.exists() else 0) + 65536, purpose="store archive"):
+        _publish(ref, store, data, catalogue)
+
+
+def _publish(ref: PackageRef, store: Path, data: bytes, catalogue: Path) -> None:
     entries = catalogue_entries(catalogue) if catalogue.exists() else []
     for entry in entries:
         if (entry["name"], entry["version"]) == (ref["name"], ref["version"]):
@@ -372,7 +381,14 @@ def _extract(ref: PackageRef, store: Path, destination: Path, policy: Path, revi
         if not destination.is_dir() or any(destination.iterdir()):
             fail("destination-not-empty", str(destination))
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix=".aepm-extract-", dir=destination.parent) as temporary:
+    from .ledger import tracked
+    from .space import reserve
+    from .space import require_space
+    needed = sum(len(data) for data in payloads.values())
+    require_space(destination.parent, needed, purpose="extract " + ref["name"])
+    holder = tempfile.TemporaryDirectory(prefix=".aepm-extract-", dir=destination.parent)
+    with tracked(holder.name, "extract", purpose="extract " + ref["name"]), holder as temporary, \
+            reserve(destination.parent, needed, purpose="extract " + ref["name"]):
         stage = Path(temporary) / "payload"
         stage.mkdir()
         executable = {f["path"] for f in c["files"] if f["executable"]}

@@ -89,30 +89,32 @@ def _paths(kind: str) -> tuple[Path, Path]:
 
 @contextmanager
 def heavy(kind: str, *, purpose: str, timeout: float = DEFAULT_TIMEOUT):
-    """One holder of `kind` per machine. Re-entrant within this process; yields the seconds this call waited."""
+    """One holder of `kind` per machine. Re-entrant within a thread: the lock is released only when the last of that
+    thread's blocks exits, in whatever order they exit. Yields the seconds this call waited."""
     lock_path, holder_path = _paths(kind)
+    me = threading.get_ident()
     with _GUARD:
-        held = _HELD.get(kind)
-        if held is not None and held[0] == threading.get_ident():
-            held[1] += 1
-            nested = True
-        else:
-            nested = False
-    if nested:
-        try:
-            yield 0.0
-        finally:
-            with _GUARD:
-                _HELD[kind][1] -= 1
-        return
-    with file_lock(lock_path, timeout=timeout, purpose=purpose, holder_path=holder_path, kind=kind) as waited:
+        state = _HELD.get(kind)
+        nested = state is not None and state[0] == me
+        if nested:
+            state[1] += 1
+    waited = 0.0
+    if not nested:
+        manager = file_lock(lock_path, timeout=timeout, purpose=purpose, holder_path=holder_path, kind=kind)
+        waited = manager.__enter__()
         with _GUARD:
-            _HELD[kind] = [threading.get_ident(), 1]
-        try:
-            yield waited
-        finally:
-            with _GUARD:
-                _HELD.pop(kind, None)
+            _HELD[kind] = [me, 1, manager]
+    try:
+        yield waited
+    finally:
+        with _GUARD:
+            state = _HELD[kind]
+            state[1] -= 1
+            last = state[1] == 0
+            if last:
+                del _HELD[kind]
+        if last:
+            state[2].__exit__(None, None, None)
 
 
 def holders() -> list[dict]:

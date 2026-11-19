@@ -74,6 +74,8 @@ def fetch_one(store: Path, package: str, number: str, *, origin: str = CATALOGUE
     """Fetch one package: the archive checked against the catalogue digest, then any release assets beside it."""
     name(package, "package")
     version(number, "package")
+    from .space import require_space
+    require_space(store, 0, purpose="fetch " + package)
     kind, metadata = _metadata(origin, package, number)
     expected = _digest(metadata.get("digest"), "digest")
     short = package.split("/", 1)[1]

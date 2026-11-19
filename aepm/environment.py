@@ -178,6 +178,7 @@ def revalidate_resources(context):
 
 
 def materialize(resource, destination):
+    from .copying import copy_file
     before = resource_records(resource)
     if digest(canonical(before)) != resource["digest"]:
         fail("resource-changed", resource["id"])
@@ -189,8 +190,7 @@ def materialize(resource, destination):
             target.mkdir(parents=True, exist_ok=True)
         else:
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(original.resolve(), target)
-            target.chmod(record["mode"])
+            copy_file(original.resolve(), target, mode=record["mode"])
     copied = {**resource, "path": str(destination)}
     if resource_records(resource) != before:
         fail("resource-changed", resource["id"])
@@ -199,12 +199,15 @@ def materialize(resource, destination):
     return copied
 
 
+WORKING = {"androidSdk": "android-sdk-working", "androidCache": "gradle-working"}
+
+
 def prepare_working_resources(selected, protocol):
+    """Each copied resource's one private writable copy, verified against its digest before use."""
     protocol = private_directory(protocol)
     for resource in selected:
-        if resource["id"] in ("androidSdk", "androidCache"):
-            working_name = "android-sdk-working" if resource["id"] == "androidSdk" else "gradle-working"
-            materialize(resource, protocol / working_name)
+        if resource["id"] in WORKING:
+            materialize(resource, protocol / WORKING[resource["id"]])
     if not (protocol / "gradle-working").exists():
         private_directory(protocol / "gradle-working")
 
@@ -368,8 +371,9 @@ class Execution:
             if item["kind"] != "directory":
                 fail("resource-missing", key)
             validate_resource(item)
-            actual = materialize(item, private / "resources" / key) if resource["access"] == "copy" else item
-            selected.append(actual)
+            # A copied resource gets one private writable copy, made by prepare_working_resources; the validated
+            # original is what later steps recheck.
+            selected.append(item)
             records.append({"id": key, "digest": item["digest"]})
         values, references = {}, {}
         for name in grant["secrets"]:
@@ -389,7 +393,9 @@ class Execution:
         descriptor = {"format": 1, "runId": self.run_id, "package": suite["package"], "id": suite["id"],
                       "mode": context["mode"] if kind != "local" else "local",
                       "simulationKind": context["simulationKind"] if kind == "simulation" else None,
-                      "settings": settings, "resources": [{key: item[key] for key in ("id", "path", "digest")} for item in selected],
+                      "settings": settings, "resources": [{"id": item["id"], "digest": item["digest"],
+                                                           "path": str(protocol / WORKING[item["id"]]) if item["id"] in WORKING else item["path"]}
+                                                          for item in selected],
                       "secrets": references, "operations": grant["operations"], "origins": grant["origins"], "assertions": declaration["assertions"]}
         write(protocol / "context.json", descriptor)
         environment = {"AEPM_CONTEXT_FILE": str(protocol / "context.json"), "AEPM_RESULT_FILE": str(protocol / "result.json"),

@@ -9,15 +9,18 @@ import tempfile
 from typing import Any, NoReturn
 
 from .model import AepmError, canonical, digest
+from . import state as _state  # noqa: F401  (owner identity read before any test replaces native libraries)
 
 
 class VerificationDirectory:
-    """Preserve private files when owned-process cleanup cannot be confirmed."""
+    """A check's private root, recorded in the run ledger. Kept, with its reason, when owned-process or device cleanup
+    cannot be confirmed; otherwise removed on exit. `written` and `kept` hold its bytes at the end."""
 
-    def __init__(self, prefix):
+    def __init__(self, prefix, *, purpose="check"):
         self.temporary = tempfile.TemporaryDirectory(prefix=prefix, delete=False)
         self.path = Path(self.temporary.name).resolve()
-        self.preserve = False
+        self.preserve, self.retained, self.devices = False, None, []
+        self.written = self.kept = 0
         if os.name == "posix":
             try:
                 from .private_process import enroll_root
@@ -25,13 +28,26 @@ class VerificationDirectory:
             except BaseException:
                 self.temporary.cleanup()
                 raise
+        from .ledger import record
+        self.entry = record(self.path, "check", purpose=purpose)
 
     def __enter__(self):
         return self.path
 
-    def __exit__(self, *_):
+    def __exit__(self, kind, error, trace):
+        from .ledger import finish
+        from .space import tree_bytes
+        try:
+            self.written = tree_bytes(self.path)
+        except Exception:
+            self.written = 0
         if not self.preserve:
             self.temporary.cleanup()
+            self.kept = 0
+        else:
+            self.kept = self.written
+        finish(self.entry, retained=(self.retained or "cleanup-failed") if self.preserve else None, devices=self.devices)
+        return False
 
 
 def fail(code: str, path: object, *, detail: dict | None = None) -> NoReturn:

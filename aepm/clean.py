@@ -161,6 +161,10 @@ def clean(*, apply: bool = False, older_than: str | None = None) -> dict:
         fail("clean-plan-changed", str(plan_path), detail={"planned": len(plan.get("candidates", [])) if plan else None,
                                                              "current": len(listing)})
     removed, failed = [], []
+    from .ledger import entries
+    for entry in entries():
+        if not Path(entry["root"]).exists() and not alive(entry):
+            forget(entry["root"])
     for item in result["candidates"]:
         within = item.get("within")
         entry = entry_for(within or item["path"])

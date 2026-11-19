@@ -99,88 +99,98 @@ def propose(root: Path, definition, store: Path, policy: Path, trusted: bool, *,
         if stage.exists():
             snapshot(stage)
             shutil.rmtree(stage)
-        next_assembly = assemble(definition, lock, Path(store), stage, Path(policy))
-        stage.chmod(root.stat().st_mode & 0o7777)
-        old_owned = {item["path"] for item in previous["files"]}
-        new_owned = {item["path"] for item in next_assembly["files"]}
-        old_directories = {parent.as_posix() for path in old_owned for parent in PurePosixPath(path).parents if parent.as_posix() != "."}
-        # Preserve every unmanaged file and directory; never adopt an unmanaged collision.
-        for record in before:
-            path = record["path"]
-            if path in (".", ".aepm") or path.startswith(".aepm/") or path in old_owned:
-                continue
-            collision = any(path.casefold() == owned.casefold() or path.casefold().startswith(owned.casefold() + "/")
-                            or ((record["kind"] == "file" or path not in old_directories)
-                                and owned.casefold().startswith(path.casefold() + "/")) for owned in new_owned)
-            if collision:
-                fail("unmanaged-collision", path)
-            destination = rooted(stage, path)
-            if record["kind"] == "directory":
-                destination.mkdir(parents=True, exist_ok=True)
-                destination.chmod(record["mode"])
-            else:
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(root / path, destination)
-        # Unmanaged metadata also survives unless the installer now owns that exact path.
-        new_metadata = {item["path"] for item in snapshot(stage) if item["path"].startswith(".aepm/")}
-        old_generated_metadata = {".aepm/lock.json", ".aepm/assembly.json", ".aepm/definition.json"}
-        for ref in previous["lock"]["packages"]:
-            old_generated_metadata.add(".aepm/archives/" + ref["digest"] + ".tar")
-            receipt = root / ".aepm/receipts" / ref["digest"] / "guardian.dsse.json"
-            if receipt.exists():
-                from .trust import review_report_digest
-                report_digest = review_report_digest(receipt, Path(policy))
-                old_generated_metadata.add(".aepm/evidence/reports/" + report_digest + ".json")
-                retained_report = load(root / ".aepm/evidence/reports" / (report_digest + ".json"))
-                if retained_report["format"] == 2:
-                    for name, key in (("contexts", "contextDigest"), ("authorizations", "authorizationDigest"), ("execution-evidence", "evidenceDigest")):
-                        value = retained_report["execution"][key]
-                        if value is not None:
-                            old_generated_metadata.add(".aepm/evidence/" + name + "/" + value + ".json")
-            prefix = ".aepm/packages/" + ref["digest"]
-            old_generated_metadata.update(item["path"] for item in before if item["path"] == prefix or item["path"].startswith(prefix + "/"))
-            prefix = ".aepm/receipts/" + ref["digest"]
-            old_generated_metadata.update(item["path"] for item in before if item["path"] == prefix or item["path"].startswith(prefix + "/"))
-        for record in before:
-            path = record["path"]
-            if not path.startswith(".aepm/") or path in old_generated_metadata:
-                continue
-            if record["kind"] == "directory":
-                target = rooted(stage, path)
-                if target.is_file():
+        from .ledger import tracked
+        from .space import reserve, tree_bytes
+        from .application import install_bytes
+        needed = install_bytes(lock, Path(store)) + tree_bytes(root)
+        with reserve(directory, needed, purpose="propose-update " + definition["id"]), \
+                tracked(stage, "stage", purpose="propose-update " + definition["id"]) as staged, \
+                tracked(transaction_path(stage), "transaction-logs", purpose="propose-update checks " + definition["id"]) as logged:
+            staged.retained = "failed-proposal"
+            next_assembly = assemble(definition, lock, Path(store), stage, Path(policy))
+            stage.chmod(root.stat().st_mode & 0o7777)
+            old_owned = {item["path"] for item in previous["files"]}
+            new_owned = {item["path"] for item in next_assembly["files"]}
+            old_directories = {parent.as_posix() for path in old_owned for parent in PurePosixPath(path).parents if parent.as_posix() != "."}
+            # Preserve every unmanaged file and directory; never adopt an unmanaged collision.
+            for record in before:
+                path = record["path"]
+                if path in (".", ".aepm") or path.startswith(".aepm/") or path in old_owned:
+                    continue
+                collision = any(path.casefold() == owned.casefold() or path.casefold().startswith(owned.casefold() + "/")
+                                or ((record["kind"] == "file" or path not in old_directories)
+                                    and owned.casefold().startswith(path.casefold() + "/")) for owned in new_owned)
+                if collision:
                     fail("unmanaged-collision", path)
-                target.mkdir(parents=True, exist_ok=True)
-                target.chmod(record["mode"])
-                continue
-            if path in new_metadata:
-                fail("unmanaged-collision", path)
-            target = rooted(stage, path)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(root / path, target)
-        report = verify_application(stage, Path(policy), trusted, allow_network=allow_network, tool_selection=tool_selection,
-                                    adoption_root=adoption_root,
-                                    execution_context=execution_context, authorization=authorization,
-                                    execution_state=execution_state, secrets=secrets, allow_live=allow_live)
-        evidence = transaction_path(stage) / "verification"
-        for name in ("contexts", "authorizations", "execution-evidence", "reports"):
-            if (evidence / name).exists():
-                shutil.copytree(evidence / name, directory / name, dirs_exist_ok=True)
-        _, manifests = retained_manifests(stage, policy)
-        check_report(report, lock, digest(canonical(next_assembly)), manifests, evidence_root=directory, policy=policy, adoption=True)
-        if snapshot(root, previous) != before:
-            fail("snapshot-changed", "application")
-        write(directory / "report.json", report)
-        previous_files = {item["path"]: item["digest"] for item in previous["files"]}
-        next_files = {item["path"]: item["digest"] for item in next_assembly["files"]}
-        changes = [{"path": path, "before": previous_files.get(path), "after": next_files.get(path)}
-                   for path in sorted(previous_files.keys() | next_files.keys()) if previous_files.get(path) != next_files.get(path)]
-        proposal = {"format": 1, "application": definition["id"], "previousLockDigest": digest(canonical(previous["lock"])),
-                    "nextLockDigest": digest(canonical(lock)), "configurationDigest": digest(canonical(next_assembly["configuration"])),
-                    "designDigest": digest(canonical(next_assembly["design"])), "assemblyDigest": digest(canonical(next_assembly)),
-                    "reportDigest": digest(canonical(report)), "snapshotDigest": digest(canonical(before)),
-                    "stageDigest": tree_digest(stage, next_assembly), "stage": str(stage), "changes": changes}
-        write(directory / "proposal.json", proposal)
-        return proposal
+                destination = rooted(stage, path)
+                if record["kind"] == "directory":
+                    destination.mkdir(parents=True, exist_ok=True)
+                    destination.chmod(record["mode"])
+                else:
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(root / path, destination)
+            # Unmanaged metadata also survives unless the installer now owns that exact path.
+            new_metadata = {item["path"] for item in snapshot(stage) if item["path"].startswith(".aepm/")}
+            old_generated_metadata = {".aepm/lock.json", ".aepm/assembly.json", ".aepm/definition.json"}
+            for ref in previous["lock"]["packages"]:
+                old_generated_metadata.add(".aepm/archives/" + ref["digest"] + ".tar")
+                receipt = root / ".aepm/receipts" / ref["digest"] / "guardian.dsse.json"
+                if receipt.exists():
+                    from .trust import review_report_digest
+                    report_digest = review_report_digest(receipt, Path(policy))
+                    old_generated_metadata.add(".aepm/evidence/reports/" + report_digest + ".json")
+                    retained_report = load(root / ".aepm/evidence/reports" / (report_digest + ".json"))
+                    if retained_report["format"] == 2:
+                        for name, key in (("contexts", "contextDigest"), ("authorizations", "authorizationDigest"), ("execution-evidence", "evidenceDigest")):
+                            value = retained_report["execution"][key]
+                            if value is not None:
+                                old_generated_metadata.add(".aepm/evidence/" + name + "/" + value + ".json")
+                prefix = ".aepm/packages/" + ref["digest"]
+                old_generated_metadata.update(item["path"] for item in before if item["path"] == prefix or item["path"].startswith(prefix + "/"))
+                prefix = ".aepm/receipts/" + ref["digest"]
+                old_generated_metadata.update(item["path"] for item in before if item["path"] == prefix or item["path"].startswith(prefix + "/"))
+            for record in before:
+                path = record["path"]
+                if not path.startswith(".aepm/") or path in old_generated_metadata:
+                    continue
+                if record["kind"] == "directory":
+                    target = rooted(stage, path)
+                    if target.is_file():
+                        fail("unmanaged-collision", path)
+                    target.mkdir(parents=True, exist_ok=True)
+                    target.chmod(record["mode"])
+                    continue
+                if path in new_metadata:
+                    fail("unmanaged-collision", path)
+                target = rooted(stage, path)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(root / path, target)
+            report = verify_application(stage, Path(policy), trusted, allow_network=allow_network, tool_selection=tool_selection,
+                                        adoption_root=adoption_root,
+                                        execution_context=execution_context, authorization=authorization,
+                                        execution_state=execution_state, secrets=secrets, allow_live=allow_live)
+            evidence = transaction_path(stage) / "verification"
+            for name in ("contexts", "authorizations", "execution-evidence", "reports"):
+                if (evidence / name).exists():
+                    shutil.copytree(evidence / name, directory / name, dirs_exist_ok=True)
+            _, manifests = retained_manifests(stage, policy)
+            check_report(report, lock, digest(canonical(next_assembly)), manifests, evidence_root=directory, policy=policy, adoption=True)
+            if snapshot(root, previous) != before:
+                fail("snapshot-changed", "application")
+            write(directory / "report.json", report)
+            previous_files = {item["path"]: item["digest"] for item in previous["files"]}
+            next_files = {item["path"]: item["digest"] for item in next_assembly["files"]}
+            changes = [{"path": path, "before": previous_files.get(path), "after": next_files.get(path)}
+                       for path in sorted(previous_files.keys() | next_files.keys()) if previous_files.get(path) != next_files.get(path)]
+            proposal = {"format": 1, "application": definition["id"], "previousLockDigest": digest(canonical(previous["lock"])),
+                        "nextLockDigest": digest(canonical(lock)), "configurationDigest": digest(canonical(next_assembly["configuration"])),
+                        "designDigest": digest(canonical(next_assembly["design"])), "assemblyDigest": digest(canonical(next_assembly)),
+                        "reportDigest": digest(canonical(report)), "snapshotDigest": digest(canonical(before)),
+                        "stageDigest": tree_digest(stage, next_assembly), "stage": str(stage), "changes": changes}
+            write(directory / "proposal.json", proposal)
+            staged.retained, staged.references = "proposal", [str(directory / "proposal.json")]
+            logged.retained, logged.references = "proposal", [str(directory / "report.json")]
+            return proposal
 
 
 def proposal_context(path):
@@ -263,6 +273,8 @@ def apply(root: Path, proposal: Path, approval: Path, policy: Path) -> Assembly:
     with transaction(root):
         if (directory / "journal.json").exists() or (directory / "backup").exists():
             fail("pending-recovery-or-cleanup", "transaction")
+        from .space import require_space
+        require_space(directory, 64 * 1024 * 1024, purpose="apply " + value["application"])
         assembly, previous = validate_proposal(root, directory, value, policy)
         from .bundle import ordinary_path
         approval = Path(approval)

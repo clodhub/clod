@@ -50,16 +50,21 @@ class ResourceTests(unittest.TestCase):
             resource_records(self.resource)
 
     def test_source_change_during_copy_rejects(self):
-        import shutil
-        original = shutil.copyfile
+        from aepm import copying
+        original = copying.copy_file
 
-        def changed(source, target):
-            result = original(source, target)
+        def changed(source, target, **options):
+            result = original(source, target, **options)
             (self.source / "lock").write_text("changed after copying")
             return result
 
-        with patch("aepm.environment.shutil.copyfile", changed), self.assertRaises(AepmError):
-            materialize(self.resource, self.root / "private")
+        for clones in (True, False):
+            (self.source / "lock").write_text("lock")
+            self.resource["digest"] = digest(canonical(resource_records(self.resource)))
+            target = self.root / ("private-clones" if clones else "private-bytes")
+            with self.subTest(clones=clones), patch.dict(copying._CLONES, {"enabled": clones}), \
+                    patch("aepm.copying.copy_file", changed), self.assertRaises(AepmError):
+                materialize(self.resource, target)
 
     @unittest.skipIf(os.name == "nt", "POSIX symbolic links required")
     def test_readonly_inventory_binds_links_without_expanding_ancestors(self):

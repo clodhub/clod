@@ -52,7 +52,7 @@ def register(root, kind: str, *, purpose: str, keep: bool) -> dict:
     return record(root, kind, purpose=purpose, keep=keep)
 
 
-def finish(entry: dict, *, retained: str | None = None, references=()) -> dict:
+def finish(entry: dict, *, retained: str | None = None, references=(), devices=()) -> dict:
     """Close an entry. A root that no longer exists drops its entry; a remaining root keeps it with its final size."""
     from .space import tree_bytes
     from .state import write_record
@@ -66,7 +66,8 @@ def finish(entry: dict, *, retained: str | None = None, references=()) -> dict:
     size = tree_bytes(root)
     value = {**entry, "ended": int(time.time()), "bytesAtEnd": size,
              "retained": "keep" if entry.get("retained") == "keep" else retained or "interrupted",
-             "references": sorted(set(entry.get("references", [])) | set(map(str, references)))}
+             "references": sorted(set(entry.get("references", [])) | set(map(str, references))),
+             "devices": [dict(item) for item in devices]}
     write_record(path, value)
     _run_update(retained=1, bytesKept=size)
     return value

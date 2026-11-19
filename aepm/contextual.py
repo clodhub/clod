@@ -220,6 +220,8 @@ def tool_environment(home, tools, selected, *, tool_selection=None):
                    "ANDROID_USER_HOME": str(protocol / "android-user"), "ANDROID_AVD_HOME": str(protocol / "profiles/android"),
                    "JAVA_TOOL_OPTIONS": json.dumps("-Duser.home=" + str(home)),
                    "CI": "true", "PYTHONDONTWRITEBYTECODE": "1"}
+    from .verification import apple_home
+    environment.update(apple_home(home))
     if "androidSdk" in roots:
         environment["ANDROID_HOME"] = environment["ANDROID_SDK_ROOT"] = str(roots["androidSdk"])
     if "androidJavaHome" in roots:
@@ -372,7 +374,9 @@ def prerequisites(suite, descriptor, selected, root, environment, versions, *, f
                 listing = probe_json(["xcodebuild", "-project", str(project), "-list", "-json", *preparation_flags], root, discovery_environment, budget=budget, **probe)
                 for scheme in listing.get("project", {}).get("schemes", [])[:8]:
                     timeout = budget.remaining(20, reason="discovery-timeout")
-                    code, _, reason, output = run([str(Path(executable).resolve()), "-project", str(project), "-scheme", scheme, "-showdestinations", *preparation_flags], root, discovery_environment, timeout, 1024 * 1024)
+                    derived = Path(environment["AEPM_CONTEXT_FILE"]).parent.parent / "derived-data"
+                    code, _, reason, output = run([str(Path(executable).resolve()), "-project", str(project), "-scheme", scheme, "-showdestinations",
+                                                   "-derivedDataPath", str(derived), *preparation_flags], root, discovery_environment, timeout, 1024 * 1024)
                     check_probe_completion(reason, budget)
                     if code == 0 and not reason and any(re.search(rb"id:\s*" + re.escape(value.encode()) + rb"(?:[, }])", output) for value in ids):
                         supported = True
@@ -511,7 +515,21 @@ def result_document(path, suite, run_id, root, operations, cleanup=False, settin
     return value
 
 
+def copied_resources(suite, execution):
+    """The context resources this check copies privately, for admission sizing."""
+    context = getattr(execution, "context", None)
+    if not isinstance(context, dict):
+        return []
+    declared = {item["id"]: item for item in context.get("resources", [])}
+    return [declared[item["id"]] for item in suite["execution"]["resources"] if item["access"] == "copy" and item["id"] in declared]
+
+
 def execute(suite, source, allow_network, logs, execution, *, tool_selection=None, adoption_root=None):
+    from contextlib import ExitStack
+    from .copying import copy_tree
+    from .locks import heavy, kinds_for
+    from .space import free_bytes, from_os_error, insufficient, out_of_space, reserve
+    from .verification import check_bytes, low_space
     tool_selection = require_selection(tool_selection)
     adoption = {} if adoption_root is None else {"adoption_root": adoption_root}
     wall_started = time.monotonic()
@@ -523,8 +541,25 @@ def execute(suite, source, allow_network, logs, execution, *, tool_selection=Non
     output_remaining = 8 * 1024 * 1024
     launch_bindings = {}
     containment_failed = False
-    workspace = VerificationDirectory(prefix="aepm-context-")
-    with workspace as temporary:
+    locks, space = [], None
+    admitted = ExitStack()
+    try:
+        admitted.enter_context(reserve(tempfile.gettempdir(), check_bytes(suite, source, copied_resources(suite, execution)),
+                                       purpose="check " + suite["id"]))
+    except AepmError as error:
+        if error.code != "insufficient-space":
+            raise
+        events.append({"step": "validation-inputs", "preparation": True, "seconds": 0, "exitCode": None,
+                       "reason": "insufficient-space", "suppressed": True})
+        log = canonical(events)
+        private_directory(logs)
+        immutable_blob(logs / (digest(log) + ".json"), log)
+        return ({"package": suite["package"], "id": suite["id"], "scope": suite["scope"], "status": "blocked", "exitCode": None,
+                 "seconds": 0, "reason": "insufficient-space", "logDigest": digest(log), "storage": {"writtenBytes": 0, "keptBytes": 0},
+                 "locks": [], "space": error.detail}, record)
+    held = ExitStack()
+    workspace = VerificationDirectory(prefix="aepm-context-", purpose="check " + suite["id"])
+    with admitted, workspace as temporary:
         private = private_directory(Path(temporary).resolve())
         selected, environment, descriptor, aliases = [], {}, None, None
         alias_failed = False
@@ -541,8 +576,11 @@ def execute(suite, source, allow_network, logs, execution, *, tool_selection=Non
         root, protocol = private / "root", private / "protocol"
         try:
             snapshot(source)
-            shutil.copytree(source, root)
+            copy_tree(source, root)
             kind, descriptor, selected, record["resources"], injected = execution.prepare(suite, private)
+            for lock_kind in kinds_for(suite):
+                waited = held.enter_context(heavy(lock_kind, purpose="check " + suite["id"], timeout=budget.remaining()))
+                locks.append({"kind": lock_kind, "waitedMilliseconds": round(waited * 1000)})
             budget.restrict(descriptor["settings"].get("maximumSeconds"))
             budget.remaining()
             record["kind"] = kind
@@ -556,6 +594,11 @@ def execute(suite, source, allow_network, logs, execution, *, tool_selection=Non
                 aliases = {name: os.readlink(private / "tools" / name) for name in suite["tools"]}
                 aliases_unchanged()
             environment.update(injected)
+            if "android-emulator" in [item["kind"] for item in locks]:
+                from .locks import free_port
+                environment["AEPM_EMULATOR_PORT"] = str(free_port())
+            from .seeds import seed_check
+            seed_check(root, environment)
             versions = tool_versions(suite, root, environment, launch_bindings, budget=budget, **selection)
             for name in [*suite["fixtures"], *suite["locks"]]:
                 if not rooted(root, name).exists():
@@ -592,6 +635,9 @@ def execute(suite, source, allow_network, logs, execution, *, tool_selection=Non
                 step_reason = ""
                 if error or code != 0:
                     step_reason = error if error and error in EXECUTION_REASONS else "process-failed" if main else "preparation-failed"
+                    if not error and low_space(private):
+                        step_reason = "insufficient-space"
+                        space = insufficient(private, "check " + suite["id"], None, free_bytes(private)).detail
                 event = {"step": index, "preparation": not main, "seconds": duration, "exitCode": code, "reason": step_reason}
                 events.append(event)
                 diagnostic = recorder.document(suite, index, not main)
@@ -639,6 +685,11 @@ def execute(suite, source, allow_network, logs, execution, *, tool_selection=Non
         except (AepmError, OSError, ValueError, KeyError, TypeError) as error:
             if isinstance(error, AepmError) and error.code == "cleanup-failed" and error.path == "process-containment":
                 containment_failed = True
+            if out_of_space(error):
+                error = from_os_error(error, "check " + suite["id"])
+            if isinstance(error, AepmError) and error.code == "insufficient-space":
+                space = space or error.detail
+                status = "failed"
             reason = error.code if isinstance(error, AepmError) and error.code in EXECUTION_REASONS else "result-invalid"
             if record["checkStarted"]:
                 status = "failed"
@@ -696,6 +747,7 @@ def execute(suite, source, allow_network, logs, execution, *, tool_selection=Non
                     (protocol / "secrets.json").unlink(missing_ok=True)
                 except OSError:
                     cleanup_ok = False
+            held.close()
             if record["startedAt"] is not None:
                 record["completedAt"] = clock()
             if record["startedAt"] is not None or not cleanup_ok or intents:
@@ -703,15 +755,38 @@ def execute(suite, source, allow_network, logs, execution, *, tool_selection=Non
             if not cleanup_ok:
                 status, reason = "failed", "cleanup-failed"
                 workspace.preserve = True
+                workspace.retained = "device-ownership" if intents else "cleanup-failed"
+                workspace.devices = device_records(protocol / "ownership")
                 events.append({"step": "retained-private-root", "preparation": False, "seconds": 0,
                                "exitCode": None, "reason": "cleanup-failed", "path": str(private)})
             elif alias_failed:
                 workspace.preserve = True
+                workspace.retained = "resource-changed"
                 events.append({"step": "retained-private-root", "preparation": False, "seconds": 0,
                                "exitCode": None, "reason": "resource-changed", "path": str(private)})
+        if status == "passed" and not workspace.preserve:
+            from .seeds import harvest_check
+            harvest_check(root, environment)
     private_directory(logs)
     seconds = max(seconds, math.ceil(time.monotonic() - wall_started))
     log = canonical(events + diagnostic_events)
     immutable_blob(logs / (digest(log) + ".json"), log)
-    return ({"package": suite["package"], "id": suite["id"], "scope": suite["scope"], "status": status,
-             "exitCode": code, "seconds": seconds, "reason": reason, "logDigest": digest(log)}, record)
+    result = {"package": suite["package"], "id": suite["id"], "scope": suite["scope"], "status": status,
+              "exitCode": code, "seconds": seconds, "reason": reason, "logDigest": digest(log),
+              "storage": {"writtenBytes": workspace.written, "keptBytes": workspace.kept}, "locks": locks}
+    if space is not None:
+        result["space"] = space
+    return result, record
+
+
+def device_records(directory):
+    """The devices and rooms a check recorded creating or intending to create, for the ledger."""
+    devices = []
+    for path in sorted(directory.glob("*-*.json")) if directory.is_dir() else []:
+        try:
+            item = json.loads(path.read_bytes())
+        except (OSError, ValueError):
+            continue
+        if isinstance(item, dict):
+            devices.append({key: item.get(key) for key in ("kind", "requestedId", "resourceId") if isinstance(item.get(key), (str, type(None)))})
+    return devices

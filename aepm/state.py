@@ -52,7 +52,7 @@ def process_start(pid: int) -> str | None:
         return "linux:" + values[19] if separator and len(values) > 19 and values[0] not in ("Z", "X") else None
     if sys.platform == "darwin":
         from .posix_process import DarwinProcessInfo
-        library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+        library = _LIBPROC
         info = DarwinProcessInfo()
         size = library.proc_pidinfo(pid, 3, ctypes.c_uint64(0), ctypes.byref(info), ctypes.sizeof(info))
         if size != ctypes.sizeof(info) or info.pid != pid or info.status == 5:
@@ -79,9 +79,15 @@ def process_start(pid: int) -> str | None:
     return None
 
 
+_LIBPROC = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True) if sys.platform == "darwin" else None
+_OWN = {"pid": None, "start": None}
+
+
 def owner() -> dict:
     pid = os.getpid()
-    return {"pid": pid, "processStart": process_start(pid), "runId": RUN_ID}
+    if _OWN["pid"] != pid:
+        _OWN.update(pid=pid, start=process_start(pid))
+    return {"pid": pid, "processStart": _OWN["start"], "runId": RUN_ID}
 
 
 def alive(record: dict) -> bool:
