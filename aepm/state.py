@@ -90,10 +90,19 @@ def owner() -> dict:
     return {"pid": pid, "processStart": _OWN["start"], "runId": RUN_ID}
 
 
+SUPPORTED = sys.platform.startswith("linux") or sys.platform == "darwin" or os.name == "nt"
+
+
 def alive(record: dict) -> bool:
-    """True when the recorded process is still the same running process."""
+    """False only when the recorded process is proved gone: its start time was recorded, this platform can read start
+    times, and the process now holding that number (if any) started at a different time. Anything unproved is alive."""
     start = record.get("processStart")
-    return start is not None and process_start(record.get("pid")) == start
+    if type(start) is not str or not SUPPORTED:
+        return True
+    try:
+        return process_start(record.get("pid")) == start
+    except Exception:
+        return True
 
 
 def write_record(path: Path, value: dict) -> None:

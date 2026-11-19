@@ -29,6 +29,8 @@ def duration(value: str | None) -> int | None:
 def _devices_gone(entry: dict) -> bool:
     """True only when every device the root's check created is confirmed absent from this machine."""
     for device in entry.get("devices", []):
+        if device.get("kind") in ("apple-device", "android-device") and not device.get("resourceId"):
+            return False  # only an intent was recorded: the device it made, if any, has an unknown identity
         if device.get("kind") == "apple-device":
             try:
                 result = subprocess.run(["xcrun", "simctl", "list", "devices", "-j"], capture_output=True, text=True, timeout=60)
@@ -56,27 +58,91 @@ def _devices_gone(entry: dict) -> bool:
     return True
 
 
-def _referenced_logs(entry: dict) -> set[str]:
-    """Log file names under a transaction log root that a kept report names by digest, with their step logs."""
-    root, names = Path(entry["root"]), set()
+def _logs(root: Path) -> Path:
+    """Where a proposal's checks write their logs inside its transaction folder."""
+    return root / "verification" / "logs"
+
+
+def _referenced_logs(entry: dict) -> set[str] | None:
+    """Log file names a kept report names by digest, with the step logs each log index lists. None when a referencing
+    report or a log index it names cannot be read, since its step logs are then unknown."""
+    logs, names = _logs(Path(entry["root"])), set()
     for report_path in entry.get("references", []):
         try:
             report = json.loads(Path(report_path).read_bytes())
         except (OSError, ValueError):
             return None
-        for suite in report.get("suites", []):
-            index = suite.get("logDigest")
+        for suite in report.get("suites", []) if type(report) is dict else []:
+            index = suite.get("logDigest") if type(suite) is dict else None
             if type(index) is not str:
                 continue
             names.add(index + ".json")
             try:
-                events = json.loads((root / (index + ".json")).read_bytes())
-            except (OSError, ValueError):
+                events = json.loads((logs / (index + ".json")).read_bytes())
+            except FileNotFoundError:
                 continue
+            except (OSError, ValueError):
+                return None
             for event in events if type(events) is list else []:
                 if type(event) is dict and type(event.get("logDigest")) is str:
                     names.add(event["logDigest"] + ".log")
     return names
+
+
+def _with_devices(entry: dict, root: Path) -> dict:
+    """The entry with the devices its root's ownership records name, for a root whose entry recorded none (its owner
+    died before finishing). With no record at all, the profiles alone keep it protected."""
+    if entry.get("devices"):
+        return entry
+    from .contextual import device_records
+    devices = device_records(root / "protocol" / "ownership")
+    return {**entry, "devices": devices or [{"kind": "unrecorded"}]}
+
+
+def _holds_devices(root: Path) -> bool:
+    """A check root that holds an emulator or simulator profile, or any device or room ownership record."""
+    protocol = root / "protocol"
+    for name in ("profiles/android", "profiles/apple", "android-user/avd"):
+        folder = protocol / name
+        try:
+            if folder.is_dir() and any(folder.iterdir()):
+                return True
+        except OSError:
+            return True
+    ownership = protocol / "ownership"
+    try:
+        return ownership.is_dir() and any(ownership.glob("*.json"))
+    except OSError:
+        return True
+
+
+def _processes_inside(root: Path) -> bool | None:
+    """True when a running process has its executable or working directory inside root; None when that cannot be
+    determined on this machine."""
+    try:
+        from .private_process import LinuxBackend, DarwinBackend, _matches
+        import sys
+        backend = DarwinBackend() if sys.platform == "darwin" else LinuxBackend() if sys.platform.startswith("linux") else None
+        if backend is None:
+            return None
+        resolved = root.resolve()
+        for pid in backend.pids():
+            if pid == os.getpid():
+                continue
+            try:
+                record = backend.capture(pid)
+            except Exception:
+                continue
+            if record is None:
+                continue
+            try:
+                if _matches(resolved, record):
+                    return True
+            finally:
+                backend.close(record)
+        return False
+    except Exception:
+        return None
 
 
 def _transaction_busy(stage: Path) -> bool:
@@ -109,8 +175,10 @@ def survey(*, older_than: int | None = None) -> dict:
             protect("owner-alive")
         elif older_than is not None and now - entry.get("created", now) < older_than:
             protect("newer-than-limit")
-        elif entry.get("retained") == "device-ownership" and not _devices_gone(entry):
+        elif (_holds_devices(root) or entry.get("retained") == "device-ownership") and not _devices_gone(_with_devices(entry, root)):
             protect("devices-not-confirmed-gone")
+        elif entry["kind"] in ("check", "review", "install", "extract", "work") and (busy := _processes_inside(root)) is not False:
+            protect("processes-inside" if busy else "processes-unknown")
         elif entry["kind"] == "stage":
             if _transaction_busy(root):
                 protect("journal-or-backup-present")
@@ -123,8 +191,8 @@ def survey(*, older_than: int | None = None) -> dict:
             if referenced is None:
                 protect("referencing-report-unreadable")
                 continue
-            for path in sorted(root.rglob("*")):
-                if path.is_file() and path.name not in referenced:
+            for path in sorted(_logs(root).glob("*")) if _logs(root).is_dir() else []:
+                if path.is_file() and not path.is_symlink() and path.name not in referenced:
                     candidates.append({**item, "path": str(path), "bytes": tree_bytes(path), "within": str(root)})
             protected.append({**item, "reason": "referenced-logs", "referenced": len(referenced)})
         elif entry["kind"] in REMOVABLE_KINDS:
@@ -132,12 +200,29 @@ def survey(*, older_than: int | None = None) -> dict:
         else:
             protect("kind-not-removable")
     unknown = []
+    known = {str(Path(path).resolve()) for path in known}
     temporary = Path(tempfile.gettempdir()).resolve()
     for path in sorted(temporary.iterdir()) if temporary.is_dir() else []:
-        if TEMPORARY.fullmatch(path.name) and str(path.absolute()) not in known and str(path.resolve()) not in known:
-            unknown.append({"path": str(path), "reason": "not-in-ledger"})
+        if TEMPORARY.fullmatch(path.name) and str(path.resolve()) not in known:
+            unknown.append({"path": str(path.resolve()), "reason": "not-in-ledger"})
     return {"candidates": candidates, "protected": protected, "unknown": unknown,
             "bytes": sum(item["bytes"] for item in candidates)}
+
+
+def _writable_seeds(path: Path) -> None:
+    """Seeds are sealed read-only; a dead run's seed folder, and only one inside aepm's own seeds folder, is made
+    writable again so it can be removed."""
+    from .state import folder
+    seeds = folder("seeds").resolve()
+    resolved = path.resolve()
+    if resolved.parent != seeds:
+        return
+    for directory, directories, _ in os.walk(resolved):
+        for name in directories:
+            child = Path(directory) / name
+            if not child.is_symlink():
+                child.chmod(0o700)
+        Path(directory).chmod(0o700)
 
 
 def _listing(result: dict) -> list:
@@ -179,6 +264,7 @@ def clean(*, apply: bool = False, older_than: str | None = None) -> dict:
 
         try:
             if path.is_dir() and not path.is_symlink():
+                _writable_seeds(path)
                 shutil.rmtree(path, onerror=record_error)
             else:
                 path.unlink()

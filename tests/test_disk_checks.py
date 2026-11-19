@@ -253,10 +253,36 @@ class InterruptionTests(Base):
         process.wait(timeout=60)
         return root
 
+    @staticmethod
+    def inside(root):
+        """Process ids whose executable or working folder is inside root."""
+        from aepm.private_process import DarwinBackend, LinuxBackend, _matches
+        backend = DarwinBackend() if sys.platform == "darwin" else LinuxBackend()
+        found = []
+        for pid in backend.pids():
+            try:
+                record = backend.capture(pid)
+            except Exception:
+                continue
+            if record is not None:
+                if _matches(root.resolve(), record):
+                    found.append(pid)
+                backend.close(record)
+        return found
+
     def test_crash_leaves_a_ledgered_root_that_clean_removes_only_after_the_owner_died(self):
         root = self.interrupted(signal.SIGKILL)
         self.assertTrue(root.exists())
-        from aepm.clean import clean
+        from aepm.clean import clean, survey
+        leftovers = self.inside(root)
+        if leftovers:
+            # The killed run's check process outlives it; while it runs there, the root stays protected.
+            self.assertEqual(next(item for item in survey()["protected"] if item["path"] == str(root))["reason"], "processes-inside")
+            for pid in leftovers:
+                os.kill(pid, signal.SIGKILL)
+            deadline = time.monotonic() + 30
+            while self.inside(root) and time.monotonic() < deadline:
+                time.sleep(0.1)
         listed = clean()
         self.assertIn(str(root), [item["path"] for item in listed["candidates"]])
         removed = clean(apply=True)
@@ -408,60 +434,90 @@ class SeedTests(Base):
         self.assertIn("seed-changed", self.seeds._STATE["events"])
         self.assertIsNone(self.seeds._STATE["root"])
 
-    def gradle_check(self, name, content, checksum):
+    def git(self, *arguments, cwd=None):
+        environment = {"PATH": os.environ.get("PATH", ""), "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
+                       "HOME": str(self.root), "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.org",
+                       "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.org"}
+        return subprocess.run(["git", *arguments], cwd=cwd, check=True, capture_output=True, text=True, env=environment).stdout.strip()
+
+    def swift_check(self, name, *, upstream=None):
+        """A check root pinning one Swift package, and a home whose SwiftPM cache holds a bare clone of it carrying
+        its own hooks and configuration, as a package author could supply them."""
+        if upstream is None:
+            upstream = self.root / "upstream"
+            if not upstream.exists():
+                upstream.mkdir()
+                self.git("init", "-q", cwd=upstream)
+                (upstream / "Sources.swift").write_text("let value = 1\n")
+                self.git("add", ".", cwd=upstream)
+                self.git("commit", "-q", "-m", "one", cwd=upstream)
+                self.git("tag", "1.0.0", cwd=upstream)
+        revision = self.git("rev-parse", "HEAD", cwd=upstream)
         root = self.root / name / "root"
-        (root / "gradle").mkdir(parents=True)
-        (root / "gradle/verification-metadata.xml").write_text(
-            '<verification-metadata xmlns="https://schema.gradle.org/dependency-verification"><components>'
-            '<component group="org.example" name="library" version="1.0.0"><artifact name="library-1.0.0.jar">'
-            f'<sha256 value="{checksum}"/></artifact></component></components></verification-metadata>')
-        home = self.root / name / "gradle"
-        jar = home / "caches/modules-2/files-2.1/org.example/library/1.0.0/abc/library-1.0.0.jar"
-        jar.parent.mkdir(parents=True)
-        jar.write_bytes(content)
-        return root, {"GRADLE_USER_HOME": str(home), "HOME": str(self.root / name), "AEPM_PRIVATE_ROOT": str(self.root / name)}
+        root.mkdir(parents=True)
+        (root / "Package.resolved").write_text(json.dumps({"version": 2, "pins": [{"identity": "library", "kind": "remoteSourceControl",
+            "location": "https://example.org/library.git", "state": {"revision": revision, "version": "1.0.0"}}]}))
+        home = self.root / name / "home"
+        cache = self.seeds._swift_cache(home)
+        cache.mkdir(parents=True)
+        repository = cache / "library-0123abcd"
+        self.git("clone", "-q", "--bare", "--no-local", str(upstream), str(repository))
+        self.git("--git-dir", str(repository), "config", "remote.origin.url", "https://example.org/library.git")
+        self.git("--git-dir", str(repository), "config", "core.fsmonitor", "touch " + str(self.root / "fsmonitor-ran"))
+        (repository / "hooks").mkdir(exist_ok=True)
+        (repository / "hooks/post-checkout").write_text("#!/bin/sh\ntouch " + str(self.root / "hook-ran") + "\n")
+        (repository / "hooks/post-checkout").chmod(0o755)
+        return root, {"HOME": str(home), "CFFIXED_USER_HOME": str(home), "AEPM_PRIVATE_ROOT": str(self.root / name)}, repository, revision
 
-    def test_gradle_artifact_with_the_wrong_sha256_is_refused(self):
-        good = hashlib.sha256(b"jar bytes").hexdigest()
-        root, environment = self.gradle_check("first", b"jar bytes", good)
+    def loose(self, repository, revision):
+        """Unpack the repository's objects so each is its own file, then return the path of the tracked file's blob."""
+        packs = list((repository / "objects/pack").glob("*.pack"))
+        for pack in packs:
+            moved = self.root / pack.name
+            pack.rename(moved)
+            pack.with_suffix(".idx").unlink()
+            subprocess.run(["git", "--git-dir", str(repository), "unpack-objects", "-q"], stdin=open(moved, "rb"), check=True)
+        blob = self.git("--git-dir", str(repository), "rev-parse", revision + ":Sources.swift")
+        return repository / "objects" / blob[:2] / blob[2:]
+
+    @unittest.skipUnless(shutil.which("git") and os.name != "nt", "git and POSIX modes required")
+    def test_swift_seed_is_a_fresh_repository_without_the_packages_hooks_or_configuration(self):
+        root, environment, _, revision = self.swift_check("first")
         self.seeds.harvest_check(root, environment)
-        second_root, second_environment = self.gradle_check("second", b"jar bytes", good)
+        seed = self.seeds._STATE["root"] / "swift/library-0123abcd"
+        self.assertFalse((seed / "hooks").exists())
+        self.assertNotIn("fsmonitor", (seed / "config").read_text())
+        second_root, second_environment, second_cache, _ = self.swift_check("second")
+        shutil.rmtree(second_cache)
         self.assertEqual(self.seeds.seed_check(second_root, second_environment), [])
-        offered = Path(second_environment["GRADLE_RO_DEP_CACHE"])
-        self.assertTrue(offered.is_relative_to(self.root / "second"))
-        self.assertEqual(next(offered.rglob("library-1.0.0.jar")).read_bytes(), b"jar bytes")
-        third_root, third_environment = self.gradle_check("third", b"jar bytes", "0" * 64)
-        refused = self.seeds.seed_check(third_root, third_environment)
-        self.assertEqual(len(refused), 1)
-        self.assertNotIn("GRADLE_RO_DEP_CACHE", third_environment)
-        fourth_root, fourth_environment = self.gradle_check("fourth", b"other jar", "1" * 64)
-        self.seeds._STATE.update(root=None, entry=None, fingerprint=None)
-        self.seeds.harvest_check(fourth_root, fourth_environment)
-        self.assertIsNone(self.seeds._STATE["root"])
+        copied = self.seeds._swift_cache(Path(second_environment["HOME"])) / "library-0123abcd"
+        self.assertFalse((copied / "hooks").exists())
+        self.assertEqual(self.git("--git-dir", str(copied), "rev-parse", "refs/tags/1.0.0^{commit}"), revision)
+        self.assertFalse((self.root / "hook-ran").exists() or (self.root / "fsmonitor-ran").exists())
 
-    @unittest.skipUnless(shutil.which("git"), "git required")
-    def test_swift_repository_whose_tag_moved_is_refused(self):
-        repository = self.root / "repository"
-        repository.mkdir()
-        environment = {"PATH": os.environ.get("PATH", ""), "GIT_CONFIG_NOSYSTEM": "1", "HOME": str(self.root),
-                       "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.org", "GIT_COMMITTER_NAME": "Test",
-                       "GIT_COMMITTER_EMAIL": "test@example.org"}
+    @unittest.skipUnless(shutil.which("git") and os.name != "nt", "git and POSIX modes required")
+    def test_swift_repository_with_an_altered_object_is_not_seeded(self):
+        import zlib
+        root, environment, repository, revision = self.swift_check("first")
+        blob = self.loose(repository, revision)
+        blob.chmod(0o644)
+        blob.write_bytes(zlib.compress(b"blob 24\x00let value = 666 // evil\n"))
+        self.seeds.harvest_check(root, environment)
+        seeds = self.seeds._STATE["root"]
+        self.assertFalse(seeds is not None and (seeds / "swift/library-0123abcd").exists())
+        second_root, second_environment, second_cache, _ = self.swift_check("second")
+        shutil.rmtree(second_cache)
+        self.seeds.seed_check(second_root, second_environment)
+        self.assertFalse(self.seeds._swift_cache(Path(second_environment["HOME"])).joinpath("library-0123abcd").exists())
 
-        def git(*arguments):
-            return subprocess.run(["git", "-C", str(repository), *arguments], check=True, capture_output=True, text=True,
-                                  env=environment).stdout.strip()
-
-        git("init", "-q")
-        git("config", "remote.origin.url", "https://example.org/library.git")
-        git("commit", "-q", "--allow-empty", "-m", "one")
-        git("tag", "1.0.0")
-        first = git("rev-parse", "HEAD")
-        pins = [{"location": "https://example.org/library", "revision": first, "version": "1.0.0"}]
-        self.assertEqual(self.seeds.swift_repository_state(repository, pins), "pinned")
-        git("commit", "-q", "--allow-empty", "-m", "two")
-        git("tag", "-f", "1.0.0")
-        self.assertEqual(self.seeds.swift_repository_state(repository, pins), "moved")
-        self.assertIsNone(self.seeds.swift_repository_state(repository, [{**pins[0], "location": "https://example.org/other"}]))
+    @unittest.skipUnless(shutil.which("git") and os.name != "nt", "git and POSIX modes required")
+    def test_swift_repository_missing_part_of_the_pinned_history_is_not_seeded(self):
+        root, environment, repository, revision = self.swift_check("first")
+        blob = self.loose(repository, revision)
+        blob.unlink()
+        self.seeds.harvest_check(root, environment)
+        seeds = self.seeds._STATE["root"]
+        self.assertFalse(seeds is not None and (seeds / "swift/library-0123abcd").exists())
 
     def test_user_and_system_caches_are_never_touched(self):
         root, environment, hexdigest = self.npm_check("first", b"tarball bytes")

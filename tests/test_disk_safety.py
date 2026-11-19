@@ -138,7 +138,7 @@ class LockTests(StateTest):
         started = time.monotonic()
         with heavy("gradle", purpose="second", timeout=30) as waited:
             self.assertGreater(waited, 0.5)
-            self.assertEqual(holder.poll(), 0)
+            self.assertEqual(holder.wait(timeout=30), 0)
         self.assertLess(time.monotonic() - started, 30)
 
     def test_timeout_names_the_live_holder(self):
@@ -235,12 +235,12 @@ class LockTests(StateTest):
     def test_second_process_waits_for_the_final_holder_then_gets_the_lock(self):
         from contextlib import ExitStack
         from aepm.locks import heavy
-        waiting = self.child("import time\nfrom aepm.locks import heavy\nstarted = time.monotonic()\n"
-                             "with heavy('gradle', purpose='waiting process', timeout=30) as waited:\n"
-                             "    print('acquired', round(waited, 1), flush=True)\n")
         inner = ExitStack()
         with heavy("gradle", purpose="outer", timeout=1):
             inner.enter_context(heavy("gradle", purpose="inner", timeout=1))
+            waiting = self.child("from aepm.locks import heavy\nprint('waiting', flush=True)\n"
+                                 "with heavy('gradle', purpose='waiting process', timeout=30) as waited:\n"
+                                 "    print('acquired', round(waited, 1), flush=True)\n", wait_for="waiting")
             time.sleep(0.5)
         time.sleep(1.0)
         self.assertIsNone(waiting.poll(), "the second process got the lock before the final holder exited")
@@ -336,17 +336,23 @@ class LedgerAndCleanTests(StateTest):
         pending_stage = self.dead_root("third/.c.aepm-transaction/stage", kind="stage", retained="proposal")
         device_root = self.dead_root("device-check", retained="device-ownership",
                                      devices=[{"kind": "provider-room", "requestedId": "room", "resourceId": "room"}])
-        logs = self.root / "logs"
-        logs.mkdir()
+        # The layout update.propose writes: the pending proposal's report beside its stage, and the checks' logs in
+        # the stage's own transaction folder under verification/logs.
+        from aepm.verification import transaction_path
+        proposal_stage = pending_stage
+        transaction = transaction_path(proposal_stage)
+        logs = transaction / "verification" / "logs"
+        logs.mkdir(parents=True)
         (logs / ("a" * 64 + ".json")).write_text(json.dumps([{"logDigest": "b" * 64}]))
         (logs / ("b" * 64 + ".log")).write_text("kept output")
         (logs / ("c" * 64 + ".log")).write_text("unreferenced output")
-        report = self.root / "report.json"
+        (transaction / "verification" / ("d" * 64 + ".json")).write_text("{}")
+        report = proposal_stage.parent / "report.json"
         report.write_text(json.dumps({"suites": [{"logDigest": "a" * 64}]}))
         self.dead_root("logs-owner")
-        log_entry = record(logs, "transaction-logs", purpose="propose logs", references=[report])
+        log_entry = record(transaction, "transaction-logs", purpose="propose logs", references=[report])
         log_entry.update(pid=999999, processStart="gone")
-        _entry_path(logs).write_bytes(canonical(log_entry))
+        _entry_path(transaction).write_bytes(canonical(log_entry))
         unknown = Path(tempfile.gettempdir()) / ("aepm-verification-unknown-" + digest(str(self.root).encode())[:8])
         unknown.mkdir()
         self.addCleanup(unknown.rmdir)
@@ -361,7 +367,7 @@ class LedgerAndCleanTests(StateTest):
         self.assertEqual(reasons[str(busy_stage)], "journal-or-backup-present")
         self.assertEqual(reasons[str(pending_stage)], "pending-proposal")
         self.assertEqual(reasons[str(device_root)], "devices-not-confirmed-gone")
-        self.assertIn(str(unknown), [item["path"] for item in listed["unknown"]])
+        self.assertIn(str(unknown.resolve()), [item["path"] for item in listed["unknown"]])
         self.assertTrue(dead.exists())
 
         code, value = self.command("clean", "--apply")
@@ -369,7 +375,8 @@ class LedgerAndCleanTests(StateTest):
         self.assertEqual(sorted(item["path"] for item in value["result"]["removed"]), paths)
         for path in paths:
             self.assertFalse(Path(path).exists())
-        for path in (live, kept, busy_stage, pending_stage, device_root, unknown, logs / ("b" * 64 + ".log"), logs / ("a" * 64 + ".json")):
+        for path in (live, kept, busy_stage, pending_stage, device_root, unknown, logs / ("b" * 64 + ".log"), logs / ("a" * 64 + ".json"),
+                     transaction / "verification" / ("d" * 64 + ".json"), report):
             self.assertTrue(path.exists(), path)
         log = json.loads(Path(value["result"]["log"]).read_bytes())
         self.assertEqual(len(log["removed"]), 4)

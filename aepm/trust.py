@@ -509,7 +509,11 @@ def validate_suite_resources(suite: dict) -> None:
         kinds.append(item["kind"])
     if len(kinds) != len(set(kinds)):
         fail("suite-result", "report.suites.locks")
-    if ("space" in suite) != (suite["reason"] == "insufficient-space"):
+    if suite["reason"] == "insufficient-space" and "space" not in suite:
+        fail("suite-result", "report.suites.space")
+    if "space" in suite and suite["reason"] not in ("insufficient-space", "cleanup-failed"):
+        fail("suite-result", "report.suites.space")
+    if "space" in suite and suite["status"] != "failed" and suite["reason"] == "cleanup-failed":
         fail("suite-result", "report.suites.space")
     if "space" in suite:
         space = fields(suite["space"], "path purpose required free margin reserved", "report.suites.space")

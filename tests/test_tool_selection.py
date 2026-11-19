@@ -301,7 +301,7 @@ class ContextualTests(Guarded):
                  "tools": {"python3": "3.12", "node": "26.5"}, "fixtures": [], "locks": [], "network": False,
                  "timeoutSeconds": 30, "requirements": [], "execution": {"kind": "local", "simulation": False,
                  "operations": [], "settings": [], "secrets": [], "resources": [], "assertions": [], "cleanup": cleanup}}
-        execution = SimpleNamespace(check_time=lambda: None, run_id="fixture", authorization=None,
+        execution = SimpleNamespace(check_time=lambda: None, run_id="fixture", authorization=None, selection=lambda suite: ("local", {}),
                                     prepare=lambda *_: ("local", {"settings": {}, "operations": [], "simulationKind": None}, [], [], {}))
         launched = []
 
@@ -401,7 +401,7 @@ class ContextualTests(Guarded):
                  "cwd": ".", "prepare": [], "tools": {"xcrun": "72"}, "fixtures": [], "locks": [], "network": False,
                  "timeoutSeconds": 30, "requirements": [], "execution": {"kind": "local", "simulation": False,
                  "operations": [], "settings": [], "secrets": [], "resources": [], "assertions": [], "cleanup": None}}
-        execution = SimpleNamespace(check_time=lambda: None, run_id="fixture", authorization=None,
+        execution = SimpleNamespace(check_time=lambda: None, run_id="fixture", authorization=None, selection=lambda suite: ("local", {}),
                                     prepare=lambda *_: ("local", {"settings": {}, "operations": [], "simulationKind": None}, [], [], {}))
         with patch.object(contextual, "VerificationDirectory", return_value=workspace), \
                 patch.object(contextual, "run", side_effect=AssertionError("no launch")):

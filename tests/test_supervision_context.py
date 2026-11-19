@@ -44,7 +44,7 @@ class ContextualObservationTests(unittest.TestCase):
             if expired and state["ran"]:
                 raise AepmError("authorization-expired", "fixture")
 
-        execution = SimpleNamespace(check_time=check_time, run_id="fixture", authorization=None,
+        execution = SimpleNamespace(check_time=check_time, run_id="fixture", authorization=None, selection=lambda suite: ("local", {}),
                                     prepare=lambda *_: ("local", {"settings": {}, "operations": [], "simulationKind": None},
                                                         [{}] if resource_failure else [], [], {}))
 

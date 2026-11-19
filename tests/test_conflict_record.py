@@ -148,7 +148,7 @@ class ConflictRecordTests(Guarded):
                  "cwd": ".", "prepare": [], "tools": {}, "fixtures": [], "locks": [], "network": False,
                  "timeoutSeconds": 30, "requirements": [], "execution": {"kind": "local", "simulation": False,
                  "operations": [], "settings": [], "secrets": [], "resources": [], "assertions": [], "cleanup": None}}
-        execution = SimpleNamespace(check_time=lambda: None, run_id="fixture", authorization=None,
+        execution = SimpleNamespace(check_time=lambda: None, run_id="fixture", authorization=None, selection=lambda suite: ("local", {}),
                                     prepare=lambda *_: ("local", {"settings": {}, "operations": [], "simulationKind": None}, [], [], {}))
 
         def run(argv, cwd, environment, timeout, limit, *, diagnostics=None, **_):

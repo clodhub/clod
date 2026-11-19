@@ -346,8 +346,8 @@ def execute_suite(suite, source, allow_network, logs, *, tool_selection=None, ad
                     if isinstance(error, AepmError) and error.code != "insufficient-space":
                         raise
                     detail = (from_os_error(error, "check " + suite["id"]) if isinstance(error, OSError) else error).detail
-                    workspace.preserve = False
-                    status, reason, space = "failed", "insufficient-space", detail
+                    # A failed cleanup keeps the root and names the result; the full volume is recorded beside it.
+                    status, reason, space = "failed", "cleanup-failed" if workspace.preserve else "insufficient-space", detail
                 if workspace.preserve:
                     workspace.retained = "cleanup-failed"
                     events.append({"step": "retained-private-root", "preparation": False, "seconds": 0,
@@ -390,7 +390,7 @@ def make_report(lock, assembly_digest, manifests, roots, application_root, polic
         suite_started = clock()
         source = roots[suite["package"]] if suite["root"] == "package" else application_root
         if exhausted is not None:
-            # A volume that ran out stops the remaining checks; each is recorded with the numbers that stopped them.
+            # A volume that filled during a check stops the remaining checks; each records the numbers that stopped it.
             result = stopped_result(suite, exhausted, logs)
             record = evidence_record(suite)
         elif "execution" in suite:
@@ -406,7 +406,9 @@ def make_report(lock, assembly_digest, manifests, roots, application_root, polic
             for prerequisite in record["prerequisites"]:
                 prerequisite["reason"] = "unsupported-prerequisite"
         results.append(result)
-        if result["reason"] == "insufficient-space" and exhausted is None:
+        if "space" in result and result["status"] == "failed" and exhausted is None:
+            # The volume filled while a check ran. A check refused at admission blocks only itself: a smaller later
+            # check may still fit.
             exhausted = result["space"]
         if "class" in suite:
             from .foundations import class_result_evidence
