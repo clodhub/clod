@@ -17,7 +17,7 @@ from unittest.mock import Mock, patch
 from types import SimpleNamespace
 
 from aepm.model import AepmError
-from aepm.private_process import AuditToken, DarwinBackend, LinuxBackend, Identity, PrivateScope, enroll_root
+from aepm.private_process import AuditToken, CaptureRace, DarwinBackend, LinuxBackend, Identity, PrivateScope, enroll_root
 from aepm.process import run
 
 if os.name == "nt":
@@ -147,17 +147,18 @@ class SimulatedPrivateScopeTests(unittest.TestCase):
             enroll_root(self.root, before_work=True, backend=FakeBackend({}))
 
     def test_simulated_linux_missing_path_requires_descriptor_exit(self):
-        for exited in (False, True):
-            with self.subTest(exited=exited):
+        for exited, error in ((False, FileNotFoundError), (True, FileNotFoundError), (False, ProcessLookupError), (True, ProcessLookupError)):
+            with self.subTest(exited=exited, error=error.__name__):
                 backend = LinuxBackend.__new__(LinuxBackend)
                 backend.exited = Mock(return_value=exited)
                 backend.open_descriptor = Mock(return_value=123)
-                with patch.object(Path, "read_text", side_effect=FileNotFoundError), patch("aepm.private_process.os.close") as close:
+                with patch.object(Path, "read_text", side_effect=error), patch("aepm.private_process.os.close") as close:
                     if exited:
                         self.assertIsNone(backend.capture(456))
                     else:
-                        with self.assertRaisesRegex(AepmError, "private-process-discovery"):
+                        with self.assertRaisesRegex(AepmError, "private-process-discovery") as raised:
                             backend.capture(456)
+                        self.assertIsInstance(raised.exception, CaptureRace)
                     backend.exited.assert_called_once_with(123)
                     close.assert_called_once_with(123)
 
@@ -191,6 +192,29 @@ class SimulatedPrivateScopeTests(unittest.TestCase):
         close.assert_not_called()
         record, _ = self.linux_capture(allow=True, readlink=lambda path: "/usr/bin/" + Path(path).name)
         self.assertEqual((record.executable, record.paths_unreadable), ("/usr/bin/exe", False))
+
+    def test_exiting_process_during_a_scan_is_rechecked_not_fatal(self):
+        backend = FakeBackend({})
+        enroll_root(self.root, before_work=True, backend=backend)
+        scope = self.scope(backend)
+        scope.bind(300)
+        backend.records[200] = Identity(200, 200, os.geteuid(), 1, 300, 2, "/outside/program", "/outside", generation=1)
+        original = backend.capture
+        exiting = {"left": 1}
+
+        def capture(pid, **options):
+            if pid == 200 and exiting["left"]:
+                exiting["left"] -= 1
+                raise CaptureRace()
+            return original(pid, **options)
+
+        backend.capture = capture
+        scope.scan(force=True)
+        self.assertTrue(scope.unresolved)
+        del backend.records[200]
+        scope.scan(force=True)
+        self.assertFalse(scope.unresolved)
+        self.assertTrue(scope.finish(time.monotonic() + .5))
 
     def test_unreadable_preexisting_process_is_baseline_never_owned(self):
         record = Identity(100, 100, os.geteuid(), 1, 100, 2, None, None, generation=7, paths_unreadable=True)

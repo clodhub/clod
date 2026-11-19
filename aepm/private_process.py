@@ -272,14 +272,16 @@ class LinuxBackend:
                 os.close(descriptor)
                 return None
             return result
-        except FileNotFoundError:
+        except (FileNotFoundError, ProcessLookupError):
+            # The held descriptor keeps the number from being reused. An exiting process loses its /proc links before the
+            # descriptor reports the exit, and a reaped one fails reads of files opened just before; scans recheck it.
             try:
                 gone = self.exited(descriptor)
             finally:
                 os.close(descriptor)
             if gone:
                 return None
-            fail("cleanup-failed", "private-process-discovery")
+            raise CaptureRace()
         except BaseException:
             os.close(descriptor)
             raise
