@@ -427,7 +427,7 @@ class FoundationTests(unittest.TestCase):
         integrity = "sha512-" + base64.b64encode(b"a" * 64).decode()
         records = (
             ("pkg:maven/org.example/example@4.2.0", "gradle.lockfile", b"org.example:example:4.2.0=runtimeClasspath\n"),
-            ("pkg:swift/example.org/example@4.2.0", "Package.resolved", canonical({"pins": [], "version": 3})),
+            ("pkg:swift/example.org/owner/example@4.2.0", "Package.resolved", canonical({"pins": [], "version": 3})),
         )
         for purl, path, raw in records:
             with self.subTest(purl=purl):

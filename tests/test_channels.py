@@ -66,7 +66,9 @@ class ChannelTests(unittest.TestCase):
         shutil.copytree(cls.root / "game", source)
         manifest = json.loads((source / "component.json").read_text())
         manifest["identity"]["version"] = number
-        manifest["release"] = {"channel": "preview" if "-" in number else "features", "fixes": []}
+        from aepm.channels import channel_of
+        channel = channel_of(number)
+        manifest["release"] = {"channel": channel, "fixes": ["GHSA-game-0001-test"] if channel == "security" else []}
         if extra_class is not None:
             manifest["classes"].append(extra_class)
         write(source / "recipe.json", {**document, "version": number})
@@ -188,6 +190,54 @@ class ChannelTests(unittest.TestCase):
         with self.assertRaises(AepmError) as raised:
             next_definition(self.app, "security", self.fresh, self.origin)
         self.assertEqual(raised.exception.code, "release-channel")
+
+
+
+class RecipeSecurityTests(unittest.TestCase):
+    """A recipe security release whose deck slot needs a newer deck class than the installed substitute implements."""
+    recipe = ChannelTests.__dict__["recipe"]
+    serve = ChannelTests.__dict__["serve"]
+    tearDownClass = ChannelTests.__dict__["tearDownClass"]
+    setUp = ChannelTests.setUp
+
+    @classmethod
+    def setUpClass(cls):
+        design.RecipeDesignTests.setUpClass.__func__(cls)
+        deck = copy.deepcopy(SLOT_CLASSES["deck"])
+        deck["descriptor"].update(version="1.1.0")
+        deck["descriptor"]["settings"]["properties"]["colour"] = LABEL
+        deck["reference"] = {"name": deck["descriptor"]["name"], "version": "1.1.0", "digest": digest(canonical(deck["descriptor"]))}
+        changed = copy.deepcopy(RECIPE)
+        changed["components"][0]["class"] = deck["reference"]
+        cls.recipe("0.1.1", changed, extra_class=deck)
+        cls.unfit = None
+        cls.serve()
+
+    def test_a_recipe_release_that_leaves_a_slot_unfit_is_skipped(self):
+        from aepm.channels import next_definition
+        with self.assertRaises(AepmError) as raised:
+            next_definition(self.app, "security", self.fresh, self.origin)
+        self.assertEqual(raised.exception.code, "no-update")
+        [entry] = raised.exception.detail["skipped"]
+        self.assertEqual((entry["name"], entry["version"], entry["slot"]), ("ourapps-ae/game", "0.1.1", "deck"))
+        self.assertTrue(any(reason.startswith("class-") for reason in entry["reasons"]), entry)
+
+    def test_component_releases_still_move_against_the_installed_recipe(self):
+        from aepm.channels import next_definition
+        manifest = component(self.root / "host-security", "host", collect=design.HOST_SETTINGS, profiles=design.HOST_PROFILES)
+        manifest["identity"]["version"] = "0.1.1"
+        manifest["release"] = {"channel": "security", "fixes": ["CVE-2026-0001"]}
+        (self.root / "host-security" / "component.json").write_bytes(canonical(manifest))
+        ref = pack(self.root / "host-security", self.store)
+        base = "/api/components/host/0.1.1"
+        Catalogue.routes[base] = {"name": ref["name"], "version": "0.1.1", "digest": "sha256:" + ref["digest"]}
+        Catalogue.routes[base + "/bundle"] = {"digest": "sha256:" + ref["digest"], "url": f"{self.origin}/dl/{ref['digest']}"}
+        Catalogue.routes[f"/dl/{ref['digest']}"] = (self.store / "objects" / (ref["digest"] + ".tar")).read_bytes()
+        Catalogue.routes["/api/components/host/latest"]["versions"].append({"version": "0.1.1", **manifest["release"]})
+        nxt, skipped = next_definition(self.app, "security", self.fresh, self.origin)
+        self.assertEqual(nxt["recipe"]["version"], "0.1.0")
+        self.assertEqual({item["name"]: item["version"] for item in nxt["components"]}["ourapps-ae/host"], "0.1.1")
+        self.assertEqual([(item["name"], item["slot"]) for item in skipped], [("ourapps-ae/game", "deck")])
 
 
 if __name__ == "__main__":

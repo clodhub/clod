@@ -292,6 +292,30 @@ class RecipeDocumentTests(unittest.TestCase):
             self.assertEqual(raised.exception.code, "recipe-format")
 
 
+class PurlTests(unittest.TestCase):
+    """The package URL rule the catalogue applies (shared/src/foundations.ts parsePurl)."""
+
+    def test_package_urls_follow_the_specification(self):
+        from aepm.foundations import _purl, parse_purl
+        for value in ("pkg:npm/left-pad@1.3.0", "pkg:npm/%40angular/core@17.0.0", "pkg:npm/@angular/core@17.0.0",
+                      "pkg:maven/org.example/lib@1.0", "pkg:swift/github.com/vapor/vapor@4.0.0", "pkg:golang/golang.org/x/net@0.1.0",
+                      "pkg:pypi/requests@2.31.0", "pkg:cargo/serde@1.0.0", "pkg:generic/lib@1.0"):
+            with self.subTest(value=value):
+                self.assertIsNotNone(parse_purl(value))
+        self.assertEqual(parse_purl("pkg:npm/%40angular/core@17.0.0"),
+                         {"type": "npm", "namespace": ["@angular"], "name": "core", "version": "17.0.0"})
+        for value in ("pkg:npm/@1.3.0", "pkg:swift/client-sdk-swift@2.19.0", "pkg:npm/", "npm/left-pad@1.3.0", "pkg:maven/lib@1.0",
+                      "pkg:swift/lib@1.0", "pkg:swift/vapor/vapor@4.0.0", "pkg:pypi/acme/requests@1.0", "pkg:NPM/left-pad@1.0",
+                      "pkg:npm/a//b@1.0", "pkg:npm/left pad@1.0", "pkg:npm/%E0%A4%A@1.0", "pkg:npm/a/b/c@1.0"):
+            with self.subTest(value=value):
+                self.assertIsNone(parse_purl(value))
+                with self.assertRaisesRegex(AepmError, "invalid-purl"):
+                    _purl(value, "upstream.purl", "1.0")
+        _purl("pkg:swift/github.com/livekit/client-sdk-swift@2.19.0", "upstream.purl", "2.19.0")
+        with self.assertRaisesRegex(AepmError, "upstream-purl"):
+            _purl("pkg:npm/left-pad@1.3.0", "upstream.purl", "1.3.1")
+
+
 class PolicyTests(unittest.TestCase):
     def test_update_policy_and_earlier_definitions(self):
         from aepm.application import DEFAULT_POLICY, parse_update_policy, validate_definition

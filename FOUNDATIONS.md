@@ -30,6 +30,10 @@ Advisory ids are an upper-case prefix, a hyphen, then letters, digits, `.`, `:`,
 
 `classes/categories.json` is `{"format": 1, "categories": [{"id", "title", "parent"}]}`. Ids are unique paths of lower-case segments of letters, digits and hyphens joined by `/`; a top-level id's parent is null and a nested id's parent is the id less its last segment (`category-parent`), and is present (`category-unknown`). `aepm.foundations.validate_categories(document, class_categories)` checks this and that each given class category exists. aepm checks only a class's category form; the class generator, the publish tool and the catalogue check that it exists.
 
+## Package URLs
+
+Upstream `purl` and compatibility dependency names follow the package URL specification as the catalogue reads it: `pkg:` and a lower-case type, then the namespace segments the type needs, a non-empty name that does not start with `@`, and the version, each percent-decoded strictly. `maven`, `golang`, `github`, `bitbucket` and `composer` need at least one namespace segment, and `swift` at least two, the repository host and owner (`pkg:swift/github.com/owner/name@1.0.0`). `cargo`, `gem`, `pypi`, `nuget`, `hex`, `pub`, `cocoapods`, `hackage` and `conda` have none. An `npm` namespace is one scope (`pkg:npm/%40scope/name@1.0.0` or `pkg:npm/@scope/name@1.0.0`).
+
 ## Package foundations
 
 All fields below are mandatory. Class references are exact `{name, version, digest}` objects. Names use `ourapps-ae/<slug>`, class and interface versions use three nonnegative integers, package versions may add `-preview.N`, and digests are lowercase SHA-256. `digest` is the hash of the RFC 8785 canonical descriptor. Each descriptor is an object inside the canonical package manifest. Every inventory entry hashes one packaged file; interface and behaviour files belong to that inventory. Class identity conflicts within a selected graph are errors.

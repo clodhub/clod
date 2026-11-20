@@ -117,6 +117,62 @@ def _record(definition: dict, package: str, old: str, new: str) -> None:
             item["version"] = new
 
 
+def _security(current: dict, store: Path, origin: str) -> tuple[dict, list[dict]]:
+    """Every installed package moves to the newest security release on its line, kept only where the result fits: each
+    component release must fit its slot, and the recipe's release must leave every installed slot fitting."""
+    from .application import validate_definition
+    from .fetch import fetch
+    from .recipe import slot_fit
+    recipe = current["recipe"]
+    fetch(store, _installed(current), with_dependencies=True, origin=origin)
+    versions = published_versions(recipe["name"], origin)
+    recipe_offer = newest(recipe["version"], list(versions), "security")
+    if recipe_offer is not None:
+        _release(store, recipe["name"], recipe_offer, origin, versions[recipe_offer])
+        fetch(store, [(recipe["name"], recipe_offer)], with_dependencies=True, origin=origin)
+    offers = {}
+    for item in current["components"]:
+        versions = published_versions(item["name"], origin)
+        offered = newest(item["version"], list(versions), "security")
+        if offered is not None:
+            _release(store, item["name"], offered, origin, versions[offered])
+            offers[item["id"]] = offered
+
+    def attempt(recipe_version):
+        """The design with the recipe at `recipe_version`: component moves that fit, the moves left out, and the
+        installed components that no longer fit."""
+        nxt = deepcopy(current)
+        nxt["recipe"]["version"] = recipe_version
+        world, targets = _slot_world(store, nxt)
+        skipped, unfit = [], []
+        for item in current["components"]:
+            offered = offers.get(item["id"])
+            if offered is not None:
+                reasons = slot_fit(world, item["id"], _package(store, item["name"], offered), targets)
+                if not reasons:
+                    _record(nxt, item["name"], item["version"], offered)
+                    continue
+                skipped.append({"name": item["name"], "version": offered, "slot": item["id"], "reasons": reasons})
+            reasons = slot_fit(world, item["id"], _package(store, item["name"], item["version"]), targets)
+            if reasons:
+                unfit.append({"slot": item["id"], "reasons": reasons})
+        return nxt, skipped, unfit
+
+    recipe_skipped = []
+    nxt, skipped, unfit = attempt(recipe_offer) if recipe_offer is not None else (None, [], [])
+    if recipe_offer is not None and unfit:
+        recipe_skipped = [{"name": recipe["name"], "version": recipe_offer, "slot": item["slot"], "reasons": item["reasons"]} for item in unfit]
+    if recipe_offer is None or unfit:
+        nxt, skipped, unfit = attempt(recipe["version"])
+        if unfit:
+            fail("installed-release-unfit", unfit[0]["slot"], detail={"unfit": unfit})
+    skipped = recipe_skipped + skipped
+    if nxt == current:
+        fail("no-update", "security", detail={"skipped": skipped})
+    fetch(store, _installed(nxt), with_dependencies=True, origin=origin)
+    return validate_definition(nxt), skipped
+
+
 @guarded
 def next_definition(root: Path, channel: str, store: Path, origin: str) -> tuple[dict, list[dict]]:
     """The design an update on `channel` installs, with every package it needs fetched into the store, and the security
@@ -131,31 +187,7 @@ def next_definition(root: Path, channel: str, store: Path, origin: str) -> tuple
         fail("channel-held", channel)
     skipped = []
     if channel == "security":
-        nxt, moved = deepcopy(current), False
-        recipe = nxt["recipe"]
-        versions = published_versions(recipe["name"], origin)
-        offered = newest(recipe["version"], list(versions), "security")
-        if offered is not None:
-            _release(store, recipe["name"], offered, origin, versions[offered])
-            recipe["version"], moved = offered, True
-        fetch(store, _installed(nxt), with_dependencies=True, origin=origin)
-        world, targets = _slot_world(store, nxt)
-        for item in list(nxt["components"]):
-            versions = published_versions(item["name"], origin)
-            offered = newest(item["version"], list(versions), "security")
-            if offered is None:
-                continue
-            _release(store, item["name"], offered, origin, versions[offered])
-            reasons = slot_fit(world, item["id"], _package(store, item["name"], offered), targets)
-            if reasons:
-                skipped.append({"name": item["name"], "version": offered, "slot": item["id"], "reasons": reasons})
-                continue
-            _record(nxt, item["name"], item["version"], offered)
-            moved = True
-        if not moved:
-            fail("no-update", channel, detail={"skipped": skipped})
-        fetch(store, _installed(nxt), with_dependencies=True, origin=origin)
-        return validate_definition(nxt), skipped
+        return _security(current, store, origin)
     recipe = current["recipe"]["name"]
     versions = published_versions(recipe, origin)
     offered = newest(current["recipe"]["version"], list(versions), channel)

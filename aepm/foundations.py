@@ -199,14 +199,58 @@ def _url(value, path, *, mail=False):
     execution_url(value, path, ("https",))
 
 
+# Types whose namespace is required, with the least number of segments: Maven's group, Swift's repository host and
+# owner, Go's module path, GitHub's owner; and types that have no namespace.
+PURL_NAMESPACE = {"maven": 1, "swift": 2, "golang": 1, "github": 1, "bitbucket": 1, "composer": 1}
+PURL_NO_NAMESPACE = {"cargo", "gem", "pypi", "nuget", "hex", "pub", "cocoapods", "hackage", "conda"}
+
+
+def _decode(value: str) -> str | None:
+    """Strict percent-decoding: every `%` starts two hexadecimal digits and the bytes are UTF-8."""
+    if re.search(r"%(?![0-9A-Fa-f]{2})", value):
+        return None
+    try:
+        return unquote(value, errors="strict")
+    except UnicodeDecodeError:
+        return None
+
+
+def parse_purl(value) -> dict | None:
+    """The parts of a package URL (https://github.com/package-url/purl-spec), or None: a lower-case type, the namespace
+    its type needs, a non-empty name and an optional version, each percent-decoded."""
+    if type(value) is not str or len(value) > 1000 or re.search(r"[\s\\]", value):
+        return None
+    match = re.fullmatch(r"pkg:([A-Za-z][A-Za-z0-9.+-]*)/+([^?#]+)(\?[^#]*)?(#.*)?", value, re.S)
+    if match is None or match[1] != match[1].lower():
+        return None
+    kind, path, version = match[1], match[2].rstrip("/"), None
+    at = path.rfind("@")
+    if at > path.rfind("/"):
+        path, version = path[:at], path[at + 1:]
+    segments = [_decode(item) for item in path.split("/")]
+    if any(item is None or item in ("", ".", "..") or "/" in item for item in segments):
+        return None
+    name, namespace = segments[-1], segments[:-1]
+    if not name or name.startswith("@"):
+        return None
+    if version is not None:
+        version = _decode(version)
+        if not version or re.search(r"\s", version):
+            return None
+    if kind in PURL_NO_NAMESPACE and namespace or PURL_NAMESPACE.get(kind, 0) > len(namespace):
+        return None
+    if kind == "swift" and not re.fullmatch(r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+", namespace[0]):
+        return None
+    if kind == "npm" and namespace and (len(namespace) > 1 or not re.fullmatch(r"@[^@]+", namespace[0])):
+        return None
+    return {"type": kind, "namespace": namespace, "name": name, "version": version}
+
+
 def _purl(value, path, expected_version=None):
-    value = text(value, path)
-    parsed = urlsplit(value)
-    if parsed.scheme != "pkg" or re.search(r"\s|\\", value) or not re.fullmatch(r"[a-z][a-z0-9.+-]*/.+", parsed.path):
+    parsed = parse_purl(text(value, path))
+    if parsed is None:
         fail("invalid-purl", path)
-    tail = parsed.path.rsplit("/", 1)[-1]
-    pin = unquote(tail.rsplit("@", 1)[1]) if "@" in tail else None
-    if pin != expected_version:
+    if parsed["version"] != expected_version:
         fail("upstream-purl" if expected_version is not None else "dependency-name", path)
 
 
