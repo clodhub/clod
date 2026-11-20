@@ -30,7 +30,7 @@ NODE = tool("node", ">=22.0.0 <27.0.0", ["node", "--version"], ["brew", "install
 XCODE = tool("xcodebuild", ">=16.0.0", ["xcodebuild", "-version"], manual="Install Xcode from the Mac App Store and accept its licence.")
 XCODEGEN = tool("xcodegen", ">=2.40.0 <3.0.0", ["xcodegen", "--version"], ["brew", "install", "xcodegen"],
                 linux=["sudo", "apt-get", "install", "--yes", "xcodegen"])
-QUESTIONS = [{"id": "targets", "ask": "Devices?", "askAgent": "infer", "type": "set", "options": ["web", "ios"],
+QUESTIONS = [{"id": "targets", "question": "Devices?", "ask": "unless-settled", "askAgent": "infer", "type": "set", "options": ["web", "ios"],
               "default": ["web", "ios"], "effects": []}]
 
 
@@ -40,7 +40,7 @@ def package(root, name, toolchains, *, recipe=False, dependencies=None):
     if recipe:
         manifest.update(kind="recipe", implements=[], classes=[])
         manifest["artefacts"][0]["destination"] = "run.sh"
-        write(root / "recipe.json", {"format": 1, "name": "ourapps-ae/" + name, "version": "0.1.0", "title": "Game", "components": [],
+        write(root / "recipe.json", {"format": 2, "name": "ourapps-ae/" + name, "version": "0.1.0", "title": "Game", "components": [],
                                       "questions": QUESTIONS, "connections": [], "tests": {"defaultAnswers": {}, "answerSets": []}})
         manifest["files"].append({"path": "recipe.json", "executable": False})
         manifest["files"].sort(key=lambda item: item["path"])

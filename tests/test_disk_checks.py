@@ -150,9 +150,9 @@ class CheckSpaceTests(Base):
         source = self.root / "source"
         fixture(source)
         ref = pack(source, store)
-        definition = {"format": 1, "id": "app", "title": "App", "recipe": {"name": ref["name"], "version": ref["version"]},
+        definition = {"format": 2, "id": "app", "title": "App", "recipe": {"name": ref["name"], "version": ref["version"]},
                       "components": [], "configuration": {}, "design": {"definitions": [], "instances": [], "connections": []},
-                      "updatePolicy": "patch"}
+                      "updatePolicy": {"security": "auto", "features": "manual", "preview": "hold"}}
         lock = {"format": 1, "application": "app", "definitionDigest": digest(canonical(definition)),
                 "packages": [{**ref, "dependencies": []}]}
         before = sorted(base.iterdir())

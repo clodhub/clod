@@ -11,7 +11,7 @@ import urllib.request
 from .bundle import add_archive, read_package
 from .evidence import evidence_paths, unpack_evidence
 from .io import write
-from .model import PackageRef, canonical, digest, fail, guarded, loads, name, sha256, version
+from .model import PackageRef, canonical, digest, fail, guarded, loads, name, package_version, sha256
 
 CATALOGUE = "https://ourapps.app"
 ASSETS = "https://github.com"
@@ -73,7 +73,7 @@ def _metadata(origin: str, package: str, number: str) -> tuple[str, dict]:
 def fetch_one(store: Path, package: str, number: str, *, origin: str = CATALOGUE, assets: str = ASSETS) -> dict:
     """Fetch one package: the archive checked against the catalogue digest, then any release assets beside it."""
     name(package, "package")
-    version(number, "package")
+    package_version(number, "package")
     from .space import require_space
     require_space(store, 0, purpose="fetch " + package)
     kind, metadata = _metadata(origin, package, number)
@@ -151,6 +151,6 @@ def providers(provided_types: list[str], *, origin: str = CATALOGUE) -> list[tup
         names = set()
         for item in value["components"]:
             if type(item) is dict and type(item.get("name")) is str and type(item.get("version")) is str:
-                names.add((name(item["name"], "components.name"), version(item["version"], "components.version")))
+                names.add((name(item["name"], "components.name"), package_version(item["version"], "components.version")))
         found = names if found is None else found & names
     return sorted(found or [])

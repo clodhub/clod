@@ -22,7 +22,7 @@ from aepm.recipe import Package, fit
 from aepm.test_identities import generate
 from aepm.trust import publish_release, publish_review, review_bindings, verify_package
 from aepm.verification import review_package
-from tests.core.test_core import PYTHON, fixture
+from tests.core.test_core import CLASS_FIELDS, PYTHON, fixture, without_execution
 
 
 CHECK = b"""import importlib.util, json, os
@@ -50,12 +50,12 @@ def counter(root, name="counter", implementation=b"def increment(value):\n    re
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(raw)
         manifest["files"].append({"path": path, "executable": False})
-    descriptor = {"format": 1, "name": "ourapps-ae/counter-class", "version": "1.0.0",
+    descriptor = {**CLASS_FIELDS, "name": "ourapps-ae/counter-class", "version": "1.0.0",
                   "provides": [{"type": "counter", "version": "1.0.0", "path": "classes/counter/interface.json",
                                 "modules": {"web": ["counter.py"], "ios": ["counter.py"]}}],
                   "requires": [], "settings": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
                   "inventory": [{"path": path, "digest": digest(raw)} for path, raw in data.items() if path.startswith("classes/")],
-                  "verification": [{**deepcopy(manifest["verification"][0]), "id": "increment", "argv": [PYTHON, "classes/counter/check.py"],
+                  "verification": [{**without_execution(manifest["verification"][0]), "id": "increment", "argv": [PYTHON, "classes/counter/check.py"],
                                     "fixtures": ["classes/counter/check.py"]}]}
     reference = {"name": descriptor["name"], "version": descriptor["version"], "digest": digest(canonical(descriptor))}
     manifest.update(platforms=["web", "ios"], toolchains={"web": [], "ios": []}, classes=[{"reference": reference, "descriptor": descriptor}], implements=[reference],
@@ -247,7 +247,7 @@ class FoundationTests(unittest.TestCase):
         descriptor["verification"] = [{**deepcopy(template), "id": f"increment-{index}"} for index in range(6)]
         entry["reference"]["digest"] = digest(canonical(descriptor))
         self.manifest["implements"] = [entry["reference"]]
-        self.manifest["format"] = 2
+        self.manifest["format"] = 3
         for suite in self.manifest["verification"]:
             suite["execution"] = {"kind": "local", "simulation": False, "operations": [], "settings": [],
                                   "secrets": [], "resources": [], "assertions": [], "cleanup": None}
@@ -464,9 +464,9 @@ class FoundationTests(unittest.TestCase):
         write(other_root / "component.json", other)
         pack(self.source, self.store)
         pack(other_root, self.store)
-        definition = {"format": 1, "id": "counter-app", "title": "Counter", "recipe": {"name": "ourapps-ae/other", "version": "0.1.0"},
+        definition = {"format": 2, "id": "counter-app", "title": "Counter", "recipe": {"name": "ourapps-ae/other", "version": "0.1.0"},
                       "components": [{"id": "counter", "name": "ourapps-ae/counter", "version": "0.1.0", "configuration": {}}],
-                      "configuration": {}, "design": {"definitions": [], "instances": [], "connections": []}, "updatePolicy": "patch"}
+                      "configuration": {}, "design": {"definitions": [], "instances": [], "connections": []}, "updatePolicy": {"security": "auto", "features": "manual", "preview": "hold"}}
         for operation in (lambda: resolve(requirements(definition), self.store / "catalogue.json", "counter-app", digest(canonical(definition))),
                           lambda: assemble(definition, {"format": 1, "application": "counter-app", "definitionDigest": digest(canonical(definition)),
                                                         "packages": [{**entry, "dependencies": []} for entry in load(self.store / "catalogue.json")["entries"]]},
@@ -483,7 +483,7 @@ class FoundationTests(unittest.TestCase):
         examples = [json.loads(raw) for raw in re.findall(r"```json\n(.*?)\n```", document, re.S)]
         self.assertEqual(examples[0], {key: manifest[key] for key in examples[0]})
         self.assertEqual(digest(canonical(examples[1])), manifest["implements"][0]["digest"])
-        self.assertEqual(manifest["implements"][0]["digest"], "6a64a8ced4936b20db0cf0e54193b361e5922f8f013a71ab7ea885ffe3e8085d")
+        self.assertEqual(manifest["implements"][0]["digest"], "69d916fa86d7379b357fb545e432eeaebaa634140ee688e770cd315cc8c63af9")
         self.assertEqual(fit(manifest["implements"][0], Package(manifest, payloads.__getitem__), Package(manifest, payloads.__getitem__), ["web"]), [])
         policy = self.sign_for_review([ref])
         report = review_package(ref, self.store, policy, True)

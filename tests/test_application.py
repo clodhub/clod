@@ -82,9 +82,9 @@ class ApplicationTests(unittest.TestCase):
             statements = cls.store / "statements" / ref["digest"]
             publish_review(cls.store, ref, report, cls.identities / "guardian.pem", policy=cls.policy)
             verify_package(ref, cls.store, cls.policy)
-        cls.definition = {"format": 1, "id": "sample-app", "title": "Sample", "recipe": {"name": "ourapps-ae/recipe", "version": "0.1.0"},
+        cls.definition = {"format": 2, "id": "sample-app", "title": "Sample", "recipe": {"name": "ourapps-ae/recipe", "version": "0.1.0"},
                           "components": [{"id": "sample", "name": "ourapps-ae/sample", "version": "0.1.0", "configuration": {}}],
-                          "configuration": {}, "design": {"definitions": [], "instances": [], "connections": []}, "updatePolicy": "patch"}
+                          "configuration": {}, "design": {"definitions": [], "instances": [], "connections": []}, "updatePolicy": {"security": "auto", "features": "manual", "preview": "hold"}}
         cls.lock = resolve(requirements(cls.definition), cls.store / "catalogue.json", cls.definition["id"], digest(canonical(cls.definition)))
         cls.assembly = assemble(cls.definition, cls.lock, cls.store, cls.base / "baseline", cls.policy)
 

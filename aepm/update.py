@@ -13,6 +13,8 @@ from .verification import TRUSTED, check_report, retained_manifests, transaction
 
 from .trust import UPDATE_BINDINGS as BINDINGS
 
+PROPOSAL_FORMAT = 2
+
 
 def _lock(stream):
     """Exclusive, nonblocking: flock on POSIX, a one-byte region lock on Windows."""
@@ -66,7 +68,7 @@ def tree_digest(root, assembly):
 @guarded
 def propose(root: Path, definition, store: Path, policy: Path, trusted: bool, *, allow_network: bool = False,
             execution_context=None, authorization=None, execution_state=None, secrets=None, allow_live=False,
-            tool_selection=None, adoption_root=None) -> Proposal:
+            tool_selection=None, adoption_root=None, channel=None) -> Proposal:
     from .bundle import resolve
     from .private_process import adoption_root as validate_adoption_root
     from .tool_selection import require_selection
@@ -81,7 +83,7 @@ def propose(root: Path, definition, store: Path, policy: Path, trusted: bool, *,
     with transaction(root) as directory:
         if (directory / "journal.json").exists() or (directory / "backup").exists():
             fail("pending-recovery-or-cleanup", "transaction")
-        previous, old_manifests = retained_manifests(root, policy)
+        previous, _ = retained_manifests(root, policy)
         before = snapshot(root, previous)
         if definition["id"] != previous["application"]:
             fail("application-mismatch", "definition")
@@ -91,9 +93,7 @@ def propose(root: Path, definition, store: Path, policy: Path, trusted: bool, *,
             if ref["name"] not in old_refs:
                 continue
             old_ref = old_refs[ref["name"]]
-            old, new = exact(old_ref["version"]), exact(ref["version"])
-            policy_name = old_manifests[old_ref["digest"]]["upgrade"]["policy"]
-            if new < old or new[:2] != old[:2] or (policy_name == "none" and new != old):
+            if exact(ref["version"]) < exact(old_ref["version"]):
                 fail("update-policy", "packages")
         stage = directory / "stage"
         if stage.exists():
@@ -182,7 +182,8 @@ def propose(root: Path, definition, store: Path, policy: Path, trusted: bool, *,
             next_files = {item["path"]: item["digest"] for item in next_assembly["files"]}
             changes = [{"path": path, "before": previous_files.get(path), "after": next_files.get(path)}
                        for path in sorted(previous_files.keys() | next_files.keys()) if previous_files.get(path) != next_files.get(path)]
-            proposal = {"format": 1, "application": definition["id"], "previousLockDigest": digest(canonical(previous["lock"])),
+            proposal = {"format": PROPOSAL_FORMAT, "channel": channel, "updatePolicy": definition["updatePolicy"],
+                        "application": definition["id"], "previousLockDigest": digest(canonical(previous["lock"])),
                         "nextLockDigest": digest(canonical(lock)), "configurationDigest": digest(canonical(next_assembly["configuration"])),
                         "designDigest": digest(canonical(next_assembly["design"])), "assemblyDigest": digest(canonical(next_assembly)),
                         "reportDigest": digest(canonical(report)), "snapshotDigest": digest(canonical(before)),
@@ -195,7 +196,11 @@ def propose(root: Path, definition, store: Path, policy: Path, trusted: bool, *,
 
 def proposal_context(path):
     proposal = load(path)
-    fields(proposal, ("format", *BINDINGS, "stage", "changes"))
+    if type(proposal) is dict and proposal.get("format") == 1:
+        fail("proposal-format-outdated", "proposal")
+    fields(proposal, ("format", "channel", "updatePolicy", *BINDINGS, "stage", "changes"))
+    if proposal["format"] != PROPOSAL_FORMAT or proposal["channel"] not in (None, "security", "features", "preview"):
+        fail("invalid-format", "proposal")
     stage = Path(proposal["stage"])
     directory = stage.parent
     suffix = ".aepm-transaction"

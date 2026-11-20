@@ -17,6 +17,31 @@ from aepm.trust import (RELEASE, REVIEW, release_statement, review_bindings, rev
 
 # The suite tool: Windows installs Python as `python`.
 PYTHON = "python" if os.name == "nt" else "python3"
+LOCAL = {"kind": "local", "simulation": False, "operations": [], "settings": [], "secrets": [], "resources": [],
+         "assertions": [], "cleanup": None}
+CLASS_FIELDS = {"format": 2, "title": "Fixture class", "summary": "A class for tests", "category": "testing", "presentation": "none"}
+
+
+def png(width=1, height=1):
+    """A valid PNG of the given size: one grey pixel row repeated."""
+    import struct
+    import zlib
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+    rows = b"".join(b"\x00" + b"\x80" * width for _ in range(height))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+
+def without_execution(suite):
+    """A manifest check as a class check declares it: without the execution block."""
+    return {key: copy.deepcopy(value) for key, value in suite.items() if key != "execution"}
+
+
+def local(suites):
+    """Checks as a format 3 manifest declares them: each with its local execution block."""
+    return [{**suite, "execution": copy.deepcopy(LOCAL)} for suite in suites]
 
 
 def fixture(root, name="sample", version="0.1.0", dependencies=None, python=PYTHON):
@@ -24,13 +49,13 @@ def fixture(root, name="sample", version="0.1.0", dependencies=None, python=PYTH
     content = {"CONTRACT.md": b"# Contract\n", "interface.txt": b"interface\n",
                "example.json": b'{"format":1}', "NOTICE": b"Copyright Level N Ltd 2026\n",
                "visual.json": b"{}", "visual.svg": b"<svg/>", "visual.png": b"PNG",
-               "description.txt": b"Connected example\n", "fixture.txt": b"fixture\n",
+               "description.txt": b"Connected example\n", "fixture.txt": b"fixture\n", "example.png": png(4, 3),
                 "test.py": b"assert 2 + 2 == 4\n", "run.sh": b"#!/bin/sh\nexit 0\n",
                 "class-check.py": b"import json, os\nfrom pathlib import Path\nm = json.loads(Path(os.environ['AEPM_CANDIDATE_MANIFEST']).read_text())\nassert m['identity']['name'].startswith('ourapps-ae/')\nassert all(Path(p).is_file() for p in json.loads(os.environ['AEPM_MODULE_MAP']).values())\n"}
     for path, data in content.items():
         (root / path).write_bytes(data)
         (root / path).chmod(0o755 if path == "run.sh" else 0o644)
-    c = {"format": 1, "kind": "component",
+    c = {"format": 3, "kind": "component",
          "identity": {"name": "ourapps-ae/" + name, "version": version,
                       "sourceRevision": "test-revision", "sourceTreeDigest": "0" * 64,
                       "licence": "Apache-2.0"},
@@ -53,12 +78,18 @@ def fixture(root, name="sample", version="0.1.0", dependencies=None, python=PYTH
                            "cwd": ".", "prepare": [], "tools": {"unavailable": "1"},
                            "fixtures": ["fixture.txt"], "locks": [], "network": False,
                            "timeoutSeconds": 10, "expectedExit": 0, "scope": "platform", "requirements": ["external:native"]}],
-         "upgrade": {"policy": "patch", "migration": "files-only"}}
-    descriptor = {"format": 1, "name": "ourapps-ae/fixture-" + name, "version": "1.0.0", "provides": [], "requires": [],
+         "upgrade": {"migration": "files-only"}, "release": {"channel": "features", "fixes": []},
+         "images": [{"path": "example.png", "caption": "The fixture's example", "platform": "web", "width": 4, "height": 3}],
+         "vulnerabilityWaivers": []}
+    descriptor = {**CLASS_FIELDS, "name": "ourapps-ae/fixture-" + name, "version": "1.0.0", "provides": [], "requires": [],
                   "settings": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
                   "inventory": [{"path": "class-check.py", "digest": digest(content["class-check.py"])}],
                   "verification": [{**copy.deepcopy(c["verification"][0]), "id": "behaviour", "argv": [python, "class-check.py"],
                                     "fixtures": ["class-check.py"]}]}
+    if version.split("-")[0].split(".")[2] != "0" and "-" not in version:
+        c["release"] = {"channel": "security", "fixes": ["GHSA-test-fixture-0001"]}
+    elif "-" in version:
+        c["release"] = {"channel": "preview", "fixes": []}
     reference = {"name": descriptor["name"], "version": descriptor["version"], "digest": digest(canonical(descriptor))}
     c.update(platforms=["web"], toolchains={"web": []}, classes=[{"reference": reference, "descriptor": descriptor}], implements=[reference], upstream=[],
              compatibility={"runtimes": {}, "frameworks": {}, "dependencies": [], "styles": {"scope": "none", "namespaces": [], "conflicts": []}},
@@ -260,7 +291,7 @@ class CoreTests(unittest.TestCase):
                 if value == self.component[key] and type(value) is type(self.component[key]):
                     continue
                 # Several lists legitimately accept the empty list.
-                if value == [] and key in ("collect", "artefacts", "dependencies", "provides", "requires"):
+                if value == [] and key in ("collect", "artefacts", "dependencies", "provides", "requires", "images", "vulnerabilityWaivers"):
                     continue
                 with self.subTest(key=key, value=value), self.assertRaises(AepmError):
                     validate_component(c)

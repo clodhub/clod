@@ -27,7 +27,7 @@ def parser():
         "resolve": ("definition", ("catalogue", "out")), "sign": ("statement", ("role", "key", "out")),
         "install": ("definition", ("lock", "store", "policy", "target")),
         "verify": ("app", ("policy",)), "review": ("digest", ("store", "policy")),
-        "export": ("app", ("out",)), "propose-update": ("app definition", ("store", "policy", "out")),
+        "export": ("app", ("out",)), "propose-update": ("app", ("store", "policy", "out")),
         "approve": ("proposal", ("key", "policy", "out")), "apply": ("app proposal", ("approval", "policy")),
         "recover": ("app", ()),
     }
@@ -37,6 +37,10 @@ def parser():
             child.add_argument(position)
         for flag in flags:
             child.add_argument("--" + flag, required=True)
+        if command == "propose-update":
+            child.add_argument("definition", nargs="?")
+            child.add_argument("--channel", choices=("security", "features", "preview"))
+            child.add_argument("--from", dest="origin", default="https://ourapps.app")
         if command in ("verify", "review", "propose-update"):
             child.add_argument("--trusted", action="store_true")
             child.add_argument("--allow-network", action="store_true")
@@ -58,6 +62,10 @@ def parser():
     design.add_argument("--answers", type=Path)
     design.add_argument("--out", type=Path, required=True)
     design.add_argument("--substitute", action="append", default=[])
+    design.add_argument("--update-policy")
+    stale = commands.add_parser("outdated")
+    stale.add_argument("app", type=Path)
+    stale.add_argument("--from", dest="origin", default="https://ourapps.app")
     other = commands.add_parser("alternatives")
     other.add_argument("recipe")
     other.add_argument("slot")
@@ -89,6 +97,7 @@ def parser():
     ask = commands.add_parser("questions")
     ask.add_argument("recipe")
     ask.add_argument("--store", type=Path, required=True)
+    ask.add_argument("--answers", type=Path)
     authorize = commands.add_parser("authorize-execution")
     authorize.add_argument("request", type=Path)
     for option in ("key", "policy", "out"):
@@ -106,12 +115,12 @@ def reference(archive_digest, store):
 
 def identity(value):
     """NAME@VERSION, with NAME a package name or its short form."""
-    from .model import name, version
+    from .model import name, package_version
     package, separator, number = value.rpartition("@")
     if not separator:
         fail("arguments", "package")
     package = package if "/" in package else "ourapps-ae/" + package
-    return name(package, "package"), version(number, "package")
+    return name(package, "package"), package_version(number, "package")
 
 
 class Refused(Exception):
@@ -193,13 +202,19 @@ def dispatch(args):
             substitutes[slot] = identity(package)
         world = World.from_store(*identity(args.recipe), args.store, substitutes)
         if command == "questions":
-            return questions(world.recipe)
+            partial = load(args.answers) if args.answers is not None else {}
+            if type(partial) is not dict:
+                fail("invalid-answers", "answers")
+            return questions(world.recipe, world, partial)
         answers = load(args.answers) if args.answers is not None else {}
         if type(answers) is not dict:
             fail("invalid-answers", "answers")
         result = evaluate(world, answers)
         if not result["ok"]:
             raise Refused(result["errors"])
+        if args.update_policy is not None:
+            from .application import parse_update_policy
+            result["design"]["updatePolicy"] = parse_update_policy(args.update_policy)
         definition = validate_definition(result["design"])
         write(args.out, definition)
         return {"definition": str(args.out), "digest": digest(canonical(definition)), "components": len(definition["components"])}
@@ -251,10 +266,20 @@ def dispatch(args):
         return review_package(reference(args.digest, args.store), Path(args.store), Path(args.policy), args.trusted, allow_network=args.allow_network, **execution_options)
     if command == "export":
         return export_design(read_assembly(Path(args.app)), Path(args.out))
+    if command == "outdated":
+        from .channels import outdated
+        return outdated(args.app, args.origin)
     if command == "propose-update":
         from .update import propose
-        result = propose(Path(args.app), validate_definition(load(args.definition)), Path(args.store), Path(args.policy), args.trusted,
-                         allow_network=args.allow_network, **execution_options)
+        if (args.definition is None) == (args.channel is None):
+            fail("arguments", "propose-update")
+        if args.channel is not None:
+            from .channels import next_definition
+            definition = next_definition(Path(args.app), args.channel, Path(args.store), args.origin)
+        else:
+            definition = validate_definition(load(args.definition))
+        result = propose(Path(args.app), definition, Path(args.store), Path(args.policy), args.trusted,
+                         allow_network=args.allow_network, channel=args.channel, **execution_options)
         write(args.out, result)
         return result
     if command == "approve":

@@ -48,7 +48,7 @@ class ExecutionContextTests(unittest.TestCase):
         self.policy = generate(self.root / "keys")
         self.source, self.store = self.root / "source", self.root / "store"
         manifest = fixture(self.source)
-        manifest["format"] = 2
+        manifest["format"] = 3
         manifest["verification"] = manifest["verification"][:1]
         manifest["verification"][0]["execution"] = {"kind": "local", "simulation": False, "operations": [],
                                                        "settings": [], "secrets": [], "resources": [], "assertions": [], "cleanup": None}

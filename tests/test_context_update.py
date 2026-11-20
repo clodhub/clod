@@ -32,7 +32,7 @@ class ContextUpdateTests(unittest.TestCase):
                 directory = root / (name + version)
                 manifest = source(directory, name, version, recipe)
                 if recipe:
-                    manifest["format"] = 2
+                    manifest["format"] = 3
                     for suite in manifest["verification"]:
                         suite["execution"] = {"kind": "local", "simulation": False, "operations": [], "settings": [], "secrets": [],
                                               "resources": [], "assertions": [], "cleanup": None}
@@ -61,9 +61,9 @@ class ContextUpdateTests(unittest.TestCase):
                 self.assertEqual(report["summary"]["required-local"], "passed", report)
                 publish_review(store, ref, report, root / "keys/guardian.pem", policy=policy_path)
                 verify_package(ref, store, policy_path)
-            definition = {"format": 1, "id": "context-app", "title": "Context App", "recipe": {"name": "ourapps-ae/recipe", "version": "0.1.0"},
+            definition = {"format": 2, "id": "context-app", "title": "Context App", "recipe": {"name": "ourapps-ae/recipe", "version": "0.1.0"},
                           "components": [{"id": "sample", "name": "ourapps-ae/sample", "version": "0.1.0", "configuration": {}}],
-                          "configuration": {}, "design": {"definitions": [], "instances": [], "connections": []}, "updatePolicy": "patch"}
+                          "configuration": {}, "design": {"definitions": [], "instances": [], "connections": []}, "updatePolicy": {"security": "auto", "features": "manual", "preview": "hold"}}
             lock = resolve(requirements(definition), store / "catalogue.json", definition["id"], digest(canonical(definition)))
             app = root / "application"
             assemble(definition, lock, store, app, policy_path)

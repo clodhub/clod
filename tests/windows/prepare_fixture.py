@@ -41,7 +41,7 @@ def prepare(out):
         policy_path = generate(root / "private-identities")
         package = root / "source"
         manifest = source(package, "windows-verification", recipe=True)
-        manifest["format"] = 2
+        manifest["format"] = 3
         (package / "check.cjs").write_text(CHECK)
         manifest["files"].append({"path": "check.cjs", "executable": False})
         manifest["artefacts"].append({"source": "check.cjs", "destination": "check.cjs", "template": False, "executable": False})
@@ -67,9 +67,9 @@ def prepare(out):
             raise AssertionError(report)
         publish_review(store, ref, report, root / "private-identities/guardian.pem", policy=out / "policy.json")
         verify_package(ref, store, out / "policy.json")
-        definition = {"format": 1, "id": "windows-fixture", "title": "Windows Fixture",
+        definition = {"format": 2, "id": "windows-fixture", "title": "Windows Fixture",
                       "recipe": {"name": ref["name"], "version": ref["version"]}, "components": [], "configuration": {},
-                      "design": {"definitions": [], "instances": [], "connections": []}, "updatePolicy": "patch"}
+                      "design": {"definitions": [], "instances": [], "connections": []}, "updatePolicy": {"security": "auto", "features": "manual", "preview": "hold"}}
         lock = resolve(requirements(definition), store / "catalogue.json", definition["id"], digest(canonical(definition)))
         assembly = assemble(definition, lock, store, root / "application", out / "policy.json")
         generated = verify_application(root / "application", out / "policy.json", True)

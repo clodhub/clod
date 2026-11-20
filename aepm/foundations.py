@@ -8,7 +8,7 @@ import re
 import time
 from urllib.parse import unquote, urlsplit
 
-from .model import (array, boolean, canonical, choice, digest, fail, fields, guarded,
+from .model import (array, boolean, bounded_text, canonical, choice, digest, fail, fields, guarded,
                     integer, licence, loads, package_ref, safe_path, sha256, text,
                     unique, version)
 
@@ -16,8 +16,52 @@ PLATFORMS = ("web", "server", "ios", "macos", "tvos", "android", "windows")
 FOUNDATION_FIELDS = "platforms toolchains classes implements upstream compatibility maintenance"
 
 
+CLASS_FORMAT = 2
+CATEGORY = re.compile(r"[a-z0-9-]+(?:/[a-z0-9-]+)*")
+
+
 def validate_class_reference(value: object) -> dict:
-    return package_ref(value)
+    """A class name, version and digest; a class version is MAJOR.MINOR.PATCH, never a preview."""
+    ref = package_ref(value)
+    version(ref["version"], "class.version")
+    return ref
+
+
+def category(value: object, path: str) -> str:
+    """A category path: lower-case segments of letters, digits and hyphens, joined by `/`."""
+    if type(value) is not str or len(value) > 256 or not CATEGORY.fullmatch(value):
+        fail("invalid-category", path)
+    return value
+
+
+@guarded
+def validate_categories(value: object, class_categories=()) -> list[dict]:
+    """classes/categories.json: unique ids, each parent present, no cycles, and each given class category present."""
+    document = fields(value, "format categories", "categories")
+    if type(document["format"]) is not int or document["format"] != 1:
+        fail("invalid-format", "categories")
+    entries = array(document["categories"], "categories.categories")
+    for entry in entries:
+        fields(entry, "id title parent", "categories.categories")
+        category(entry["id"], "categories.id")
+        bounded_text(entry["title"], "categories.title")
+        if entry["parent"] is not None:
+            category(entry["parent"], "categories.parent")
+    unique([entry["id"] for entry in entries], "categories.id")
+    parents = {entry["id"]: entry["parent"] for entry in entries}
+    for entry in entries:
+        seen, current = set(), entry["id"]
+        while current is not None:
+            if current in seen:
+                fail("category-cycle", entry["id"])
+            seen.add(current)
+            if current not in parents:
+                fail("category-unknown", current)
+            current = parents[current]
+    for item in class_categories:
+        if item not in parents:
+            fail("category-unknown", item)
+    return entries
 
 
 def _strings(value, path, nonempty=False):
@@ -50,9 +94,15 @@ def _command(argv, inventory, tools):
 
 @guarded
 def validate_class_descriptor(value: object) -> dict:
-    c = fields(value, "format name version provides requires settings inventory verification", "class")
-    if type(c["format"]) is not int or c["format"] != 1:
+    if type(value) is dict and value.get("format") == 1:
+        fail("class-format-outdated", "class")
+    c = fields(value, "format name version title summary category presentation provides requires settings inventory verification", "class")
+    if type(c["format"]) is not int or c["format"] != CLASS_FORMAT:
         fail("invalid-format", "class")
+    bounded_text(c["title"], "class.title")
+    bounded_text(c["summary"], "class.summary", 500)
+    category(c["category"], "class.category")
+    choice(c["presentation"], ("visual", "none"), "class.presentation")
     validate_class_reference({"name": c["name"], "version": c["version"], "digest": digest(canonical(c))})
     inventory = {item["path"] for item in _inventory(c["inventory"], "class.inventory")}
     for key in ("provides", "requires"):
@@ -278,8 +328,11 @@ def validate_package_foundations(manifest: dict, payloads: dict[str, bytes]) -> 
                     fail("upstream-file-digest", entry["path"])
         from .provenance import validate_delivery_bytes
         validate_delivery_bytes(upstream, payloads)
+    from .images import validate_images
+    validate_images(manifest, payloads)
     if manifest["kind"] == "recipe" and "recipe.json" in payloads:
-        recipe = loads(payloads["recipe.json"], "recipe.json")
+        from .recipe import validate_recipe_document
+        recipe = validate_recipe_document(loads(payloads["recipe.json"], "recipe.json"))
         for slot in array(recipe["components"], "recipe.components"):
             class_descriptor(manifest, payloads, slot["class"])
     return result

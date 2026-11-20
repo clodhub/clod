@@ -307,6 +307,39 @@ def version(value: object, path: str) -> str:
     return value
 
 
+PACKAGE_VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-preview\.([1-9][0-9]*))?")
+
+
+def package_version(value: object, path: str) -> str:
+    """A package version: MAJOR.MINOR.PATCH, or a preview MAJOR.MINOR.PATCH-preview.N with N from 1."""
+    if type(value) is not str or not PACKAGE_VERSION.fullmatch(value):
+        fail("invalid-version", path)
+    return value
+
+
+def version_key(value: str) -> tuple:
+    """Semantic-version order: a preview comes before the release of the same MAJOR.MINOR.PATCH."""
+    match = PACKAGE_VERSION.fullmatch(value)
+    if match is None:
+        fail("invalid-version", "version")
+    major, minor, patch, preview = match.groups()
+    return int(major), int(minor), int(patch), 0 if preview else 1, int(preview or 0)
+
+
+def preview(value: str) -> bool:
+    return "-" in value
+
+
+ADVISORY = re.compile(r"[A-Z]+-[A-Za-z0-9.:_-]+")
+
+
+def advisory(value: object, path: str) -> str:
+    """An OSV, GHSA or CVE advisory id: an upper-case prefix, a hyphen, then letters, digits, `.`, `:`, `_` or `-`."""
+    if type(value) is not str or len(value) > 64 or not ADVISORY.fullmatch(value):
+        fail("invalid-advisory", path)
+    return value
+
+
 def name(value: object, path: str) -> str:
     if type(value) is not str or not re.fullmatch(r"ourapps-ae/[a-z][a-z0-9-]*", value):
         fail("invalid-name", path)
@@ -403,14 +436,14 @@ def unique(values: list, path: str, *, folded: bool = False) -> None:
 def requirement(value: object, path: str) -> Requirement:
     value = fields(value, "name version", path)
     name(value["name"], path)
-    version(value["version"], path)
+    package_version(value["version"], path)
     return cast(Requirement, value)
 
 
 def package_ref(value: object) -> PackageRef:
     value = fields(value, "name version digest", "package")
     name(value["name"], "package.name")
-    version(value["version"], "package.version")
+    package_version(value["version"], "package.version")
     sha256(value["digest"], "package.digest")
     return cast(PackageRef, value)
 
@@ -433,16 +466,47 @@ def slot_condition(value: object, path: str) -> object:
     return value
 
 
+MANIFEST_FORMAT = 3
+MAXIMUM_IMAGES = 12
+MAXIMUM_IMAGE_BYTES = 2 * 1024 * 1024
+CHANNELS = ("security", "features", "preview")
+
+
+def validate_release(value: object, number: str) -> dict:
+    """The release channel, which the version decides: a preview is `preview`; patch 0 is `features`; patch above 0 is
+    `security`, which names the advisories it fixes."""
+    release = fields(value, "channel fixes", "release")
+    choice(release["channel"], CHANNELS, "release.channel")
+    for item in array(release["fixes"], "release.fixes"):
+        advisory(item, "release.fixes")
+    unique(release["fixes"], "release.fixes")
+    patch = version_key(number)[2]
+    expected = "preview" if preview(number) else "features" if patch == 0 else "security"
+    if release["channel"] != expected or bool(release["fixes"]) != (expected == "security"):
+        fail("release-channel", "release")
+    return release
+
+
+def images_required(manifest: dict) -> bool:
+    """Example images are required for a package implementing a visual class, and for a recipe with a client target."""
+    if manifest["kind"] == "recipe" and any(platform != "server" for platform in manifest["platforms"]):
+        return True
+    descriptors = {canonical(item["reference"]): item["descriptor"] for item in manifest["classes"]}
+    return any(descriptors[canonical(ref)]["presentation"] == "visual" for ref in manifest["implements"])
+
+
 @guarded
 def validate_component(value: object) -> Component:
     from .foundations import FOUNDATION_FIELDS, validate_foundations
-    c = fields(value, "format kind identity facilities documents collect files artefacts dependencies provides requires visual capabilities infrastructure verification upgrade " + FOUNDATION_FIELDS, "component")
-    if type(c["format"]) is not int or c["format"] not in (1, 2):
+    if type(value) is dict and value.get("format") in (1, 2):
+        fail("manifest-format-outdated", "component")
+    c = fields(value, "format kind identity facilities documents collect files artefacts dependencies provides requires visual capabilities infrastructure verification upgrade release images vulnerabilityWaivers " + FOUNDATION_FIELDS, "component")
+    if type(c["format"]) is not int or c["format"] != MANIFEST_FORMAT:
         fail("invalid-format", "component")
     choice(c["kind"], ("component", "recipe"), "kind")
     identity = fields(c["identity"], "name version sourceRevision sourceTreeDigest licence", "identity")
     name(identity["name"], "identity.name")
-    version(identity["version"], "identity.version")
+    package_version(identity["version"], "identity.version")
     text(identity["sourceRevision"], "identity.sourceRevision")
     sha256(identity["sourceTreeDigest"], "identity.sourceTreeDigest")
     licence(identity["licence"], "identity.licence")
@@ -551,7 +615,7 @@ def validate_component(value: object) -> Component:
         parts = p.split("/")
         package_directories.update("/".join(parts[:i]) for i in range(1, len(parts)))
     for suite in array(c["verification"], "verification", True):
-        fields(suite, "id root argv cwd prepare tools fixtures locks network timeoutSeconds expectedExit scope requirements" + (" execution" if c["format"] == 2 else ""), "verification")
+        fields(suite, "id root argv cwd prepare tools fixtures locks network timeoutSeconds expectedExit scope requirements", "verification", "execution")
         text(suite["id"], "verification.id")
         choice(suite["root"], ("package", "application"), "verification.root")
         if c["kind"] != "recipe" and suite["root"] == "application":
@@ -590,7 +654,7 @@ def validate_component(value: object) -> Component:
             fail("invalid-timeout", "verification")
         if integer(suite["expectedExit"], "verification.expectedExit") != 0:
             fail("invalid-exit", "verification")
-        if c["format"] == 2:
+        if "execution" in suite:
             validate_execution(suite["execution"], suite)
             cleanup = suite["execution"]["cleanup"]
             if cleanup and suite["root"] == "package" and cleanup["cwd"] not in package_directories:
@@ -602,10 +666,35 @@ def validate_component(value: object) -> Component:
         safe_path(p, "required-path")
         if p not in file_modes:
             fail("missing-required-path", p)
-    upgrade = fields(c["upgrade"], "policy migration", "upgrade")
-    choice(upgrade["policy"], ("patch", "minor", "none"), "upgrade.policy")
+    upgrade = fields(c["upgrade"], "migration", "upgrade")
     choice(upgrade["migration"], ("files-only",), "upgrade.migration")
+    validate_release(c["release"], identity["version"])
+    for waiver in array(c["vulnerabilityWaivers"], "vulnerabilityWaivers"):
+        fields(waiver, "id reason", "vulnerabilityWaivers")
+        advisory(waiver["id"], "vulnerabilityWaivers.id")
+        bounded_text(waiver["reason"], "vulnerabilityWaivers.reason", 2000)
+    unique([waiver["id"] for waiver in c["vulnerabilityWaivers"]], "vulnerabilityWaivers")
+    images = array(c["images"], "images")
+    if len(images) > MAXIMUM_IMAGES:
+        fail("image-limit", "images")
+    for image in images:
+        fields(image, "path caption platform width height", "images")
+        path = safe_path(image["path"], "images.path")
+        if not path.lower().endswith((".png", ".webp")):
+            fail("image-type", path)
+        if path not in file_modes:
+            fail("missing-required-path", path)
+        bounded_text(image["caption"], "images.caption", 140)
+        for key in ("width", "height"):
+            if integer(image[key], "images." + key) <= 0:
+                fail("image-size", path)
+    unique([image["path"] for image in images], "images", folded=True)
     validate_foundations(c)
+    for image in images:
+        if image["platform"] not in c["platforms"]:
+            fail("image-platform", image["path"])
+    if not images and images_required(c):
+        fail("images-required", "images")
     canonical(c)
     return cast(Component, c)
 

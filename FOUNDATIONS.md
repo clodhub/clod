@@ -1,6 +1,38 @@
 # Package foundations
 
-All fields below are mandatory. Class references are exact `{name, version, digest}` objects. Names use `ourapps-ae/<slug>`, versions use three nonnegative integers, and digests are lowercase SHA-256. `digest` is the hash of the RFC 8785 canonical descriptor. Each descriptor is an object inside the canonical package manifest. Every inventory entry hashes one packaged file; interface and behaviour files belong to that inventory. Class identity conflicts within a selected graph are errors.
+## Document formats
+
+| Document | Format | An earlier format is refused with |
+|---|---|---|
+| Package manifest (`component.json`) | 3 | `manifest-format-outdated` |
+| Class descriptor (`class.json`, and each descriptor embedded in a manifest) | 2 | `class-format-outdated` |
+| `recipe.json` | 2 | `recipe-format-outdated` |
+| `categories.json` | 1 | none earlier |
+| Release and guardian statements | in-toto statement v1 with the release and guardian predicate types | none earlier |
+| Review and verification report | 2 (with an execution record), 1 (without) | `report-format-outdated` for results without `storage` or `locks` |
+| `.aepm/definition.json` | 2 | `definition-format-outdated` |
+| `.aepm/lock.json` | 1 | none earlier |
+| Update proposal | 2 | `proposal-format-outdated` |
+
+The catalogue entry API is defined by the catalogue, not by aepm.
+
+## Package manifest, format 3
+
+Each check's `execution` is optional: a check without it runs in a private copy with no resources and no assertions; a check with it runs with its supplied context. `upgrade` is `{migration}`. These fields are required:
+
+- `release`: `{channel, fixes}`. The version decides the channel: a preview `MAJOR.MINOR.PATCH-preview.N` is `preview`, patch 0 is `features`, patch above 0 is `security`. `fixes` lists the advisory ids a `security` release fixes (at least one, unique) and is `[]` otherwise; anything else is `release-channel`.
+- `images`: at most 12 `{path, caption, platform, width, height}`. Each path is listed in `files` and ends `.png` or `.webp`; the file is at most 2 MiB; `width` and `height` equal the size in its PNG IHDR or WebP VP8, VP8L or VP8X header; `caption` is at most 140 characters; `platform` is one of the package's platforms. The first image is the main image. At least one is required when the package implements a class whose `presentation` is `visual`, and for a recipe with any platform other than `server` (`images-required`).
+- `vulnerabilityWaivers`: `[{id, reason}]` with unique advisory ids and a non-empty reason of at most 2000 characters; `[]` when none.
+
+Advisory ids are an upper-case prefix, a hyphen, then letters, digits, `.`, `:`, `_` or `-`, at most 64 characters.
+
+## Categories
+
+`classes/categories.json` is `{"format": 1, "categories": [{"id", "title", "parent"}]}`. Ids are unique paths of lower-case segments of letters, digits and hyphens joined by `/`; each parent is null or another entry's id; parents form no cycle. `aepm.foundations.validate_categories(document, class_categories)` checks this and that each given class category exists. aepm checks only a class's category form; the class generator, the publish tool and the catalogue check that it exists.
+
+## Package foundations
+
+All fields below are mandatory. Class references are exact `{name, version, digest}` objects. Names use `ourapps-ae/<slug>`, class and interface versions use three nonnegative integers, package versions may add `-preview.N`, and digests are lowercase SHA-256. `digest` is the hash of the RFC 8785 canonical descriptor. Each descriptor is an object inside the canonical package manifest. Every inventory entry hashes one packaged file; interface and behaviour files belong to that inventory. Class identity conflicts within a selected graph are errors.
 
 ## Manifest fields
 
@@ -13,8 +45,8 @@ These fields accompany the package manifest's other required fields. The complet
     "web": [{"name": "node", "versionRange": ">=22.0.0 <27.0.0", "probe": ["node", "--version"], "install": {"macos": ["brew", "install", "node"], "windows": ["winget", "install", "--exact", "--id", "OpenJS.NodeJS"], "linux": ["sudo", "apt-get", "install", "--yes", "nodejs"]}, "manual": null}],
     "server": [{"name": "node", "versionRange": ">=22.0.0 <27.0.0", "probe": ["node", "--version"], "install": {"macos": ["brew", "install", "node"], "windows": ["winget", "install", "--exact", "--id", "OpenJS.NodeJS"], "linux": ["sudo", "apt-get", "install", "--yes", "nodejs"]}, "manual": null}]
   },
-  "classes": [{"reference": {"name": "ourapps-ae/counter-class", "version": "1.0.0", "digest": "6a64a8ced4936b20db0cf0e54193b361e5922f8f013a71ab7ea885ffe3e8085d"}, "descriptor": {"format": 1, "name": "ourapps-ae/counter-class", "version": "1.0.0", "provides": [{"type": "counter", "version": "1.0.0", "path": "classes/counter/interface.json", "modules": {"web": ["counter.mjs"], "server": ["counter.mjs"]}}], "requires": [], "settings": {"type": "object", "properties": {}, "required": [], "additionalProperties": false}, "inventory": [{"path": "classes/counter/interface.json", "digest": "316538fd92c18f09d76df05de128d1099d00d7cfbf34401f82b1bd56989ba0d2"}, {"path": "classes/counter/check.mjs", "digest": "7b6a4b0a9ba601c7c2f058f62d46b4d349c8010bd6c3f9f5d28b762209735770"}], "verification": [{"id": "behaviour", "root": "package", "argv": ["node", "classes/counter/check.mjs"], "cwd": ".", "prepare": [], "tools": {"node": "26"}, "fixtures": ["classes/counter/check.mjs"], "locks": [], "network": false, "timeoutSeconds": 30, "expectedExit": 0, "scope": "required-local", "requirements": []}]}}],
-  "implements": [{"name": "ourapps-ae/counter-class", "version": "1.0.0", "digest": "6a64a8ced4936b20db0cf0e54193b361e5922f8f013a71ab7ea885ffe3e8085d"}],
+  "classes": [{"reference": {"name": "ourapps-ae/counter-class", "version": "1.0.0", "digest": "69d916fa86d7379b357fb545e432eeaebaa634140ee688e770cd315cc8c63af9"}, "descriptor": {"format": 2, "name": "ourapps-ae/counter-class", "version": "1.0.0", "title": "Counter", "summary": "A number that goes up by one", "category": "examples/counters", "presentation": "visual", "provides": [{"type": "counter", "version": "1.0.0", "path": "classes/counter/interface.json", "modules": {"web": ["counter.mjs"], "server": ["counter.mjs"]}}], "requires": [], "settings": {"type": "object", "properties": {}, "required": [], "additionalProperties": false}, "inventory": [{"path": "classes/counter/interface.json", "digest": "316538fd92c18f09d76df05de128d1099d00d7cfbf34401f82b1bd56989ba0d2"}, {"path": "classes/counter/check.mjs", "digest": "7b6a4b0a9ba601c7c2f058f62d46b4d349c8010bd6c3f9f5d28b762209735770"}], "verification": [{"id": "behaviour", "root": "package", "argv": ["node", "classes/counter/check.mjs"], "cwd": ".", "prepare": [], "tools": {"node": "26"}, "fixtures": ["classes/counter/check.mjs"], "locks": [], "network": false, "timeoutSeconds": 30, "expectedExit": 0, "scope": "required-local", "requirements": []}]}}],
+  "implements": [{"name": "ourapps-ae/counter-class", "version": "1.0.0", "digest": "69d916fa86d7379b357fb545e432eeaebaa634140ee688e770cd315cc8c63af9"}],
   "upstream": [],
   "compatibility": {
     "runtimes": {"node": ">=22.0.0 <27.0.0"},
@@ -35,11 +67,17 @@ Platforms are `web`, `server`, `ios`, `macos`, `tvos`, `android`, `windows`. Com
 
 ## Class descriptor
 
+A descriptor carries `title` (at most 256 characters), `summary` (at most 500), `category` (a category path) and `presentation` (`visual` when implementations render something people see, else `none`); its digest covers them.
+
 ```json
 {
-  "format": 1,
+  "format": 2,
   "name": "ourapps-ae/counter-class",
   "version": "1.0.0",
+  "title": "Counter",
+  "summary": "A number that goes up by one",
+  "category": "examples/counters",
+  "presentation": "visual",
   "provides": [{"type": "counter", "version": "1.0.0", "path": "classes/counter/interface.json", "modules": {"web": ["counter.mjs"], "server": ["counter.mjs"]}}],
   "requires": [],
   "settings": {"type": "object", "properties": {}, "required": [], "additionalProperties": false},

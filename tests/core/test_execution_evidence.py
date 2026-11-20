@@ -31,7 +31,7 @@ class ExecutionEvidenceTests(unittest.TestCase):
     update = core.CoreTests.update
 
     def build(self, *, windows=False, android=False, authorized=True):
-        self.component["format"] = 2
+        self.component["format"] = 3
         for suite in self.component["verification"]:
             suite["execution"] = local_execution()
         native = self.component["verification"][1]

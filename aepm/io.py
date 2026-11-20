@@ -215,9 +215,11 @@ def rooted(root, value, dot=False):
 
 
 def exact(value, path="version"):
-    if not isinstance(value, str) or not re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", value):
+    """A package version's sort key; a preview sorts before the release of the same MAJOR.MINOR.PATCH."""
+    from .model import PACKAGE_VERSION, version_key
+    if not isinstance(value, str) or not PACKAGE_VERSION.fullmatch(value):
         fail("version", path)
-    return tuple(map(int, value.split(".")))
+    return version_key(value)
 
 
 def package_name(value):

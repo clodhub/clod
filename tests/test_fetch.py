@@ -97,7 +97,7 @@ class FetchTests(unittest.TestCase):
         manifest = fixture(recipe_root, "game")
         manifest["kind"] = "recipe"
         manifest["artefacts"][0]["destination"] = "run.sh"
-        write(recipe_root / "recipe.json", {"name": "ourapps-ae/game", "version": "0.1.0", "components": [
+        write(recipe_root / "recipe.json", {"format": 2, "questions": [], "name": "ourapps-ae/game", "version": "0.1.0", "components": [
             {"id": "sample", "class": manifest["classes"][0]["reference"],
              "preferred": {"name": "ourapps-ae/sample", "version": "0.1.0"}, "configuration": {}, "includedWhen": None}],
             "jobs": [{"id": "job", "slot": "sample", "candidates": [
@@ -154,7 +154,7 @@ class FetchInstallTests(unittest.TestCase):
         root = Path(temp.name).resolve()
         from tests.test_application import source as recipe_source
         manifest = recipe_source(root / "game", "game", recipe=True)
-        manifest["format"] = 2
+        manifest["format"] = 3
         manifest["verification"] = [suite for suite in manifest["verification"] if suite["root"] == "package"]
         for suite in manifest["verification"]:
             suite["requirements"] = []
@@ -203,9 +203,9 @@ class FetchInstallTests(unittest.TestCase):
         for path in paths:
             self.assertEqual((store / path).read_bytes(), (source / path).read_bytes())
 
-        definition = {"format": 1, "id": "game", "title": "Game", "recipe": {"name": ref["name"], "version": "0.1.0"},
+        definition = {"format": 2, "id": "game", "title": "Game", "recipe": {"name": ref["name"], "version": "0.1.0"},
                       "components": [], "configuration": {}, "design": {"definitions": [], "instances": [], "connections": []},
-                      "updatePolicy": "patch"}
+                      "updatePolicy": {"security": "auto", "features": "manual", "preview": "hold"}}
         lock = resolve(requirements(definition), store / "catalogue.json", "game", digest(canonical(definition)))
         app = root / "app"
         assemble(definition, lock, store, app, policy)

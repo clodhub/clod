@@ -57,7 +57,7 @@ class RecipeUpdateContextTests(unittest.TestCase):
             for name, route, platform, channel, delivery, version in cases:
                 package = root / name
                 manifest = fixture(package, "fixture-" + name)
-                manifest["format"] = 2
+                manifest["format"] = 3
                 manifest["artefacts"][0]["destination"] = "components/fixture-" + name + "/run.sh"
                 manifest["verification"] = manifest["verification"][:1]
                 manifest["verification"][0]["execution"] = {"kind": "local", "simulation": False, "operations": [], "settings": [],

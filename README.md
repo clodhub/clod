@@ -9,14 +9,14 @@ python3 -m aepm pack SOURCE --store STORE
 python3 -m aepm inspect DIGEST --store STORE
 python3 -m aepm bom DIGEST --store STORE --out NAME-VERSION.cdx.json
 python3 -m aepm fetch NAME@VERSION... --store STORE [--from https://ourapps.app] [--with-dependencies]
-python3 -m aepm questions RECIPE@VERSION --store STORE
+python3 -m aepm questions RECIPE@VERSION --store STORE [--answers PARTIAL]
 python3 -m aepm doctor RECIPE@VERSION --store STORE [--answers ANSWERS] [--install]
 python3 -m aepm space PATH [--need BYTES]
 python3 -m aepm locks
 python3 -m aepm lock KIND [--timeout SECONDS] [--purpose TEXT] -- COMMAND ...
 python3 -m aepm runs
 python3 -m aepm clean [--apply] [--older-than DURATION]
-python3 -m aepm design RECIPE@VERSION --store STORE [--answers ANSWERS] [--substitute SLOT=NAME@VERSION]... --out DEFINITION
+python3 -m aepm design RECIPE@VERSION --store STORE [--answers ANSWERS] [--substitute SLOT=NAME@VERSION]... [--update-policy security=auto,features=manual,preview=hold] --out DEFINITION
 python3 -m aepm alternatives RECIPE@VERSION SLOT --store STORE [--from https://ourapps.app]
 python3 -m aepm resolve DEFINITION --catalogue STORE/catalogue.json --out LOCK
 python3 -m aepm sign STATEMENT --role release --key KEY --out ENVELOPE
@@ -24,7 +24,8 @@ python3 -m aepm review DIGEST --store STORE --policy POLICY --trusted
 python3 -m aepm install DEFINITION --lock LOCK --store STORE --policy POLICY --target APP
 python3 -m aepm verify APP --policy POLICY --trusted
 python3 -m aepm export APP --out DIAGRAMS
-python3 -m aepm propose-update APP DEFINITION --store STORE --policy POLICY --trusted --out PROPOSAL
+python3 -m aepm outdated APP [--from https://ourapps.app]
+python3 -m aepm propose-update APP (NEXT_DEFINITION | --channel security|features|preview [--from https://ourapps.app]) --store STORE --policy POLICY --trusted --out PROPOSAL
 python3 -m aepm approve PROPOSAL --key KEY --policy POLICY --out APPROVAL
 python3 -m aepm apply APP PROPOSAL --approval APPROVAL --policy POLICY
 python3 -m aepm recover APP
@@ -36,7 +37,7 @@ Every digest and signature covers RFC 8785 canonical JSON (`aepm.model.canonical
 
 Each entry of a recipe's `recipe.json` `components` is a slot: `{id, class: {name, version, digest}, preferred: {name, version}, configuration, includedWhen}`. Components declare `implements`; components and recipes carry authoritative descriptors in `classes`, with digest-bound inventories of interface and behaviour files. `aepm.recipe.fit(reference, package, authority, targets=None)` checks the exact class, provided and required interfaces, settings and per-interface platform modules. Provider documentation is independent. `design` checks every filled slot and job candidate and validates the selected runtime, framework, shared dependency and stylesheet constraints. `--substitute SLOT=NAME@VERSION` records `selections[SLOT] = {component, version, reason: "substituted"}`. A job candidate names `{component, profile}` and carries `version` when it differs from the preferred package. `alternatives` queries each authoritative class-provided type, fetches candidate archives and returns `[{name, version, fits, reasons}]`.
 
-`questions` prints a recipe's questions (id, ask, askAgent, type, options or min/max, default, askWhen). `design` applies the recipe evaluation rules 1 to 25 of the component standard (`aepm.recipe.evaluate`, CEL conditions included) to the recipe's `recipe.json` and the components' manifests and `suitability.json`, all read from the store archives, and writes the application definition. Unanswered questions take their defaults. When the answers do not give a design it prints `{"ok": false, "errors": [{code, path}]}` and exits 1, writing nothing. `aepm.recipe.World.from_directories(recipe, components)` evaluates source trees instead.
+`questions` prints a recipe's questions (id, question, ask, askAgent, type, options or min/max, default, askWhen) as `questions`, with `toAsk` and `followUps`. `toAsk` lists the questions to put to the person now: those with `ask` `required` whose `askWhen` holds under `--answers PARTIAL` and the defaults, and those with `ask` `unless-settled` that PARTIAL leaves unanswered. `followUps` lists `{id, askWhen, dependsOn}` for each question that only another, still unanswered, question can bring in. `design` applies the recipe evaluation rules 1 to 25 of the component standard (`aepm.recipe.evaluate`, CEL conditions included) to the recipe's `recipe.json` and the components' manifests and `suitability.json`, all read from the store archives, and writes the application definition. Unanswered questions take their defaults. When the answers do not give a design it prints `{"ok": false, "errors": [{code, path}]}` and exits 1, writing nothing. `aepm.recipe.World.from_directories(recipe, components)` evaluates source trees instead.
 
 Installation runs no package code. Release and guardian attestations must exist before installation. Review runs before guardian signing. Reports preserve required-local, platform and deployed partitions.
 
@@ -65,7 +66,7 @@ A `requires` entry in a component or recipe manifest has fields `id type version
 
 A component installs into the slot the design gives it: an artefact destination must start with `components/<package short name>/`, and aepm writes it at `components/<slot id>/` (the design's instance id), so any component filling the slot lands in the same place; the assembly record, diagram and verification use those paths. A recipe's own artefacts stay outside `components/`. An artefact may carry `component` or `withoutComponent` (not both), naming a slot id of the design or a list of two or more different slot ids. A `component` artefact is installed, staged for updates, recorded and drawn only when every named slot is filled; a `withoutComponent` artefact only when they are not all filled, for example a stand-in module for an optional component. Two artefacts share a destination only when one carries `component: X` and the other `withoutComponent: X` (the same slot or set of slots); any other repeated destination is refused. Ownership and collision checks apply only to installed artefacts. Entries without either field always install.
 
-A definition (format 1) may carry optional `answers` and `selections` objects of canonical JSON values (each at most 65536 canonical bytes). They are saved unchanged in `.aepm/definition.json` and covered by the definition digest and the lock's `definitionDigest`; aepm does not interpret them.
+A definition (format 2) carries `updatePolicy` `{security, features, preview}`, each `auto`, `manual` or `hold` (defaults `auto`, `manual`, `hold`); a format 1 definition is refused with `definition-format-outdated`. It may carry optional `answers` and `selections` objects of canonical JSON values (each at most 65536 canonical bytes). They are saved unchanged in `.aepm/definition.json` and covered by the definition digest and the lock's `definitionDigest`; aepm does not interpret them.
 
 ## Supplied execution contexts
 
@@ -111,6 +112,12 @@ python3 -m aepm recover APP
 ```
 
 `propose-update` installs the next assembly into the sibling stage and runs its packages' declared verification checks there, so it needs `--trusted` and every package digest in the policy's `trustedExecution`; without `--trusted` it refuses with `trusted-execution-required` and writes nothing. `apply` checks the owner approval against the unchanged application and stage, then swaps the trees under the journal. `recover` completes or reverses an interrupted `apply` and confirms a committed one.
+
+Update channels: a package's `release` is `{channel, fixes}`. `security` is a patch above 0 on an existing MAJOR.MINOR line and lists one or more advisory ids in `fixes`; `features` is patch 0; `preview` is `MAJOR.MINOR.PATCH-preview.N` (N from 1), which sorts before the release of the same MAJOR.MINOR.PATCH. Pre-releases occur only in package versions and pins, never in class or interface versions. Advisory ids are an upper-case prefix, a hyphen, then letters, digits, `.`, `:`, `_` or `-`, at most 64 characters (GHSA, CVE, PYSEC, RUSTSEC, GO, OSV and the like).
+
+`outdated APP` reads each installed package's `versions` from the catalogue (`/api/{components|recipes}/<name>/latest`) and returns per package `{name, installed, line, policy, security: {version, fixes} | null, features: {version} | null, preview: {version} | null}`, downloading nothing. A listed channel that the version's form does not give is refused with `release-channel`.
+
+`propose-update APP --channel CHANNEL --store STORE` works out the next definition and fetches what it needs into STORE through the `fetch` code path. `security` moves every installed package (the recipe and every slot component, preferred or substituted) to the newest `security` release on its current line; a package present only as another package's exact `dependencies` pin moves only when that package's own release pins the new version. `features` takes the newest `features` recipe version, and `preview` the newest `features` or `preview` one, with the recorded answers, substitutions and update policy; a recorded substitute that no longer fits its slot stops the proposal with `substitute-unfit` naming the slot. A fetched package whose manifest `release` differs from the catalogue's listing is refused with `release-channel`. A channel whose policy is `hold` is refused with `channel-held`; with nothing newer it is `no-update`. The proposal (format 2) records `channel` (null for a written definition) and the definition's `updatePolicy`; aepm takes no other action on `auto` and `manual`. A format 1 proposal is refused with `proposal-format-outdated`.
 
 Run `python3 -m unittest discover -s tests` for local checks. The diagram renderer is vendored; consumers need no sibling checkout. Test modules for the POSIX private-process supervisor, version-manager shims and Darwin discovery skip on Windows. `python -B tests/run_update_cycle.py WORK` packs, reviews, installs and updates a fixture through the command line, then recovers an interrupted apply.
 

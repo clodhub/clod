@@ -218,17 +218,57 @@ def _fit(reference, package, authority, targets, *, check_graph):
     return reasons
 
 
-def questions(recipe):
-    """What to ask: each question's id, wording, type, choices or range, default and askWhen condition."""
+RECIPE_FORMAT = 2
+ASK_LEVELS = ("required", "unless-settled", "default")
+
+
+def validate_recipe_document(recipe):
+    """The recipe.json format, and each question's wording and `ask` level: `required` has no default, the others have one."""
+    from .model import fail
+    if type(recipe) is not dict or type(recipe.get("format")) is not int:
+        fail("recipe-format", "recipe.json")
+    if recipe["format"] < RECIPE_FORMAT:
+        fail("recipe-format-outdated", "recipe.json")
+    if recipe["format"] != RECIPE_FORMAT or type(recipe.get("questions")) is not list:
+        fail("recipe-format", "recipe.json")
+    for q in recipe["questions"]:
+        if type(q) is not dict or q.get("ask") not in ASK_LEVELS:
+            fail("invalid-value", "recipe.questions.ask")
+        if type(q.get("question")) is not str or not q["question"].strip():
+            fail("expected-string", "recipe.questions.question")
+        if (q["ask"] == "required") == ("default" in q):
+            fail("question-default", "recipe.questions." + str(q.get("id")))
+    return recipe
+
+
+def questions(recipe, world=None, answers=None):
+    """What to ask: each question's id, wording, `ask` level, type, choices or range, default and askWhen condition.
+    With a world, also `toAsk`, the questions to put to the person now under `answers` (a partial answer set) and the
+    defaults, and `followUps`, the questions that only another answer can bring in, with their condition."""
     out = []
     for q in recipe["questions"]:
-        item = {key: q[key] for key in ("id", "ask", "askAgent", "type") if key in q}
+        item = {key: q[key] for key in ("id", "question", "ask", "askAgent", "type") if key in q}
         for key in ("options", "min", "max", "default"):
             if key in q:
                 item[key] = q[key]
         item["askWhen"] = q.get("askWhen")
         out.append(item)
-    return out
+    if world is None:
+        return out
+    answers = dict(answers or {})
+    evaluation = _Evaluation(world, answers, None)
+    to_ask, follow_ups = [], []
+    for q in recipe["questions"]:
+        if q["id"] in answers:
+            continue
+        holds = q.get("askWhen") is None or evaluation.holds(q["askWhen"])
+        if holds and q["ask"] in ("required", "unless-settled"):
+            to_ask.append(q["id"])
+        elif not holds:
+            depends = sorted(names_in(parse_condition(q["askWhen"])) & set(evaluation.questions) - set(answers))
+            if depends:
+                follow_ups.append({"id": q["id"], "askWhen": q["askWhen"], "dependsOn": depends})
+    return {"questions": out, "toAsk": to_ask, "followUps": follow_ups}
 
 
 def fits_grammar(grammar, value):
@@ -710,8 +750,9 @@ class _Evaluation:
         if self.errors:
             return self.failure()
 
+        from .application import DEFAULT_POLICY
         design = {
-            "format": 1,
+            "format": 2,
             "id": self.application_id,
             "title": recipe["title"],
             "recipe": {"name": recipe["name"], "version": recipe["version"]},
@@ -719,7 +760,7 @@ class _Evaluation:
                             "configuration": settings[c["id"]]} for c in included_components],
             "configuration": settings[APPLICATION],
             "design": {"definitions": [], "instances": [], "connections": connections},
-            "updatePolicy": "patch",
+            "updatePolicy": dict(DEFAULT_POLICY),
             "answers": {qid: v for qid, v in self.values.items() if self.asked[qid] and v is not UNSET},
             "selections": selections,
         }

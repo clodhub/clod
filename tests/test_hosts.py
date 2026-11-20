@@ -18,9 +18,9 @@ from aepm.model import AepmError
 from tests.core.test_core import fixture
 
 # The archive digest of tests.core.test_core.fixture(); identical on macOS, Linux and Windows.
-FIXTURE_DIGEST = "200783ace69505e6b946bc250f4c81bf8cbde1c812f25250c99c753be4e3980f"
-DEFINITION = {"format": 1, "id": "sample-app", "title": "Sample", "recipe": {"name": "ourapps-ae/recipe", "version": "0.1.0"},
-              "components": [], "configuration": {}, "design": {"definitions": [], "instances": [], "connections": []}, "updatePolicy": "patch"}
+FIXTURE_DIGEST = "d2ce3d4978386522e8b8a99a060f923a2fa131b38dc92bc6370b370556ed1952"
+DEFINITION = {"format": 2, "id": "sample-app", "title": "Sample", "recipe": {"name": "ourapps-ae/recipe", "version": "0.1.0"},
+              "components": [], "configuration": {}, "design": {"definitions": [], "instances": [], "connections": []}, "updatePolicy": {"security": "auto", "features": "manual", "preview": "hold"}}
 
 
 class Reparse:

@@ -29,11 +29,39 @@ def shell_template(name, text):
     return name.endswith((".sh", ".bash", ".zsh", ".ksh", ".ps1", ".cmd", ".bat")) or bool(re.match(r"#![^\n]*\b(?:sh|bash|zsh|dash|ksh)\b", text))
 
 
+DEFINITION_FORMAT = 2
+DEFAULT_POLICY = {"security": "auto", "features": "manual", "preview": "hold"}
+
+
+def update_policy(value: object) -> dict:
+    """What happens with each channel's updates: `auto`, `manual` or `hold`."""
+    if type(value) is not dict or set(value) != set(DEFAULT_POLICY):
+        fail("invalid-fields", "updatePolicy")
+    for channel, action in value.items():
+        if action not in ("auto", "manual", "hold"):
+            fail("invalid-value", "updatePolicy." + channel)
+    return value
+
+
+def parse_update_policy(text: str) -> dict:
+    """`security=auto,features=manual` over the defaults."""
+    policy = dict(DEFAULT_POLICY)
+    for part in text.split(","):
+        channel, separator, action = part.partition("=")
+        if not separator or channel not in policy:
+            fail("arguments", "update-policy")
+        policy[channel] = action
+    return update_policy(policy)
+
+
 @guarded
 def validate_definition(value: object) -> Definition:
+    if type(value) is dict and value.get("format") == 1:
+        fail("definition-format-outdated", "definition")
     fields(value, ("format", "id", "title", "recipe", "components", "configuration", "design", "updatePolicy"), ("answers", "selections"))
-    if type(value["format"]) is not int or value["format"] != 1 or value["updatePolicy"] != "patch":
+    if type(value["format"]) is not int or value["format"] != DEFINITION_FORMAT:
         fail("definition-format", "definition")
+    update_policy(value["updatePolicy"])
     if not isinstance(value["id"], str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]*", value["id"]):
         fail("application-id", "id")
     if not isinstance(value["title"], str) or not value["title"] or len(value["title"]) > 256:

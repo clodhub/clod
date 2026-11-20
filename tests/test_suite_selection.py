@@ -44,7 +44,7 @@ class SuiteSelectionTests(unittest.TestCase):
         self.policy = generate(self.root / "keys")
         source = self.root / "source"
         manifest = fixture(source)
-        manifest["format"] = 2
+        manifest["format"] = 3
         unit = manifest["verification"][0]
         unit["execution"] = dict(kind="local", simulation=False, operations=[], settings=[], secrets=[], resources=[], assertions=[], cleanup=None)
         build = deepcopy(unit)

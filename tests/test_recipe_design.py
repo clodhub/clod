@@ -13,7 +13,7 @@ from aepm.bundle import pack
 from aepm.io import load, write
 from aepm.model import canonical, digest
 from aepm.recipe import CelError, World, evaluate, evaluate_condition, fit, parse_condition, question_kinds, questions, slot_fit
-from tests.core.test_core import PYTHON, fixture
+from tests.core.test_core import CLASS_FIELDS, PYTHON, fixture, without_execution
 
 
 def component(root, name, provides=(), requires=(), collect=(), profiles=None, document="{}"):
@@ -55,7 +55,7 @@ def attach_class(root, manifest, entry):
 
 def slot(identifier, name, provides=(), properties=None, required=(), includedWhen=None):
     check = b"import json, os\nfrom pathlib import Path\nm = json.loads(Path(os.environ['AEPM_CANDIDATE_MANIFEST']).read_text())\nassert m['identity']['name'].startswith('ourapps-ae/')\nassert all(Path(p).is_file() for p in json.loads(os.environ['AEPM_MODULE_MAP']).values())\n"
-    descriptor = {"format": 1, "name": "ourapps-ae/" + identifier + "-class", "version": "1.0.0",
+    descriptor = {**CLASS_FIELDS, "name": "ourapps-ae/" + identifier + "-class", "version": "1.0.0",
                   "provides": [{"type": "ae/" + port, "version": "1.0.0", "path": f"classes/{identifier}/{port}.json", "modules": {"web": ["run.sh"]}} for port in provides],
                   "requires": [], "settings": {"type": "object", "properties": properties or {}, "required": list(required), "additionalProperties": False},
                   "inventory": [{"path": "class-check.py", "digest": digest(check)},
@@ -71,7 +71,7 @@ def slot(identifier, name, provides=(), properties=None, required=(), includedWh
 
 
 RECIPE = {
-    "format": 1, "name": "ourapps-ae/game", "version": "0.1.0", "title": "Game",
+    "format": 2, "name": "ourapps-ae/game", "version": "0.1.0", "title": "Game",
     "components": [
         slot("deck", "ourapps-ae/deck", ["deck"], {"targets": LABEL}, ["targets"]),
         slot("video", "ourapps-ae/video", properties={"key": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$"}},
@@ -84,14 +84,14 @@ RECIPE = {
         {"id": "small", "label": "small", "load": {"concurrentPeople": 10}},
         {"id": "large", "label": "large", "load": {"concurrentPeople": 1000}}]},
     "questions": [
-        {"id": "targets", "ask": "Devices?", "askAgent": "infer", "type": "set", "options": ["web", "ios"], "default": ["web"],
+        {"id": "targets", "question": "Devices?", "ask": "unless-settled", "askAgent": "infer", "type": "set", "options": ["web", "ios"], "default": ["web"],
          "effects": [{"sets": {"deck.targets": "$answer"}}]},
-        {"id": "video", "ask": "Video?", "askAgent": "ask", "type": "boolean", "default": False, "effects": []},
-        {"id": "videoKey", "ask": "Key?", "askAgent": "ask", "type": "secretRef", "askWhen": "video",
+        {"id": "video", "question": "Video?", "ask": "default", "askAgent": "ask", "type": "boolean", "default": False, "effects": []},
+        {"id": "videoKey", "question": "Key?", "ask": "required", "askAgent": "ask", "type": "secretRef", "askWhen": "video",
          "effects": [{"sets": {"video.key": {"ref": "videoKey"}}}]},
-        {"id": "scale", "ask": "How many?", "askAgent": "infer", "type": "choice", "options": ["small", "large"], "default": "small",
+        {"id": "scale", "question": "How many?", "ask": "default", "askAgent": "infer", "type": "choice", "options": ["small", "large"], "default": "small",
          "effects": []},
-        {"id": "server", "ask": "Server?", "askAgent": "ask", "type": "text", "default": "cloudflare", "effects": []},
+        {"id": "server", "question": "Server?", "ask": "default", "askAgent": "ask", "type": "text", "default": "cloudflare", "effects": []},
     ],
     "connections": [{"source": {"instance": "deck", "port": "deck"}, "target": {"instance": "application", "port": "deck"}}],
     "tests": {"defaultAnswers": {}, "answerSets": []},
@@ -331,6 +331,13 @@ class RecipeDesignTests(unittest.TestCase):
                                    "--out", self.root / "substituted.json")
         self.assertEqual(code, 0, value)
         self.assertEqual(load(self.root / "substituted.json")["components"][0]["name"], "ourapps-ae/deck2")
+        self.assertEqual(load(self.root / "substituted.json")["updatePolicy"], {"security": "auto", "features": "manual", "preview": "hold"})
+        code, value = self.command("design", "game@0.1.0", "--store", self.store, "--update-policy", "security=manual,preview=manual",
+                                   "--out", self.root / "policy.json")
+        self.assertEqual(code, 0, value)
+        self.assertEqual(load(self.root / "policy.json")["updatePolicy"], {"security": "manual", "features": "manual", "preview": "manual"})
+        code, value = self.command("design", "game@0.1.0", "--store", self.store, "--update-policy", "security=always", "--out", self.root / "x.json")
+        self.assertEqual((code, value["error"]["code"]), (1, "invalid-value"))
         code, value = self.command("design", "game@0.1.0", "--store", self.store, "--substitute", "deck=deck9@0.1.0", "--out", self.root / "x.json")
         self.assertEqual((code, value["error"]["code"]), (1, "unknown-package"))
         write(answers, {"video": True})
@@ -339,8 +346,14 @@ class RecipeDesignTests(unittest.TestCase):
         self.assertFalse((self.root / "bad.json").exists())
         code, value = self.command("questions", "game@0.1.0", "--store", self.store)
         self.assertEqual(code, 0)
-        self.assertEqual(value["result"], questions(RECIPE))
-        self.assertEqual(value["result"][2], {"id": "videoKey", "ask": "Key?", "askAgent": "ask", "type": "secretRef", "askWhen": "video"})
+        self.assertEqual(value["result"]["questions"], questions(RECIPE))
+        self.assertEqual(value["result"]["questions"][2], {"id": "videoKey", "question": "Key?", "ask": "required", "askAgent": "ask",
+                                                           "type": "secretRef", "askWhen": "video"})
+        self.assertEqual((value["result"]["toAsk"], value["result"]["followUps"]),
+                         (["targets"], [{"id": "videoKey", "askWhen": "video", "dependsOn": ["video"]}]))
+        write(answers, {"video": True, "targets": ["web"]})
+        code, value = self.command("questions", "game@0.1.0", "--store", self.store, "--answers", answers)
+        self.assertEqual((value["result"]["toAsk"], value["result"]["followUps"]), (["videoKey"], []))
         code, value = self.command("design", "deck@0.1.0", "--store", self.store, "--out", self.root / "x.json")
         self.assertEqual((code, value["error"]["code"]), (1, "not-a-recipe"))
         code, value = self.command("questions", "game@9.9.9", "--store", self.store)

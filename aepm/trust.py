@@ -10,7 +10,7 @@ from typing import Any, cast
 from pathlib import Path
 import subprocess
 
-from .model import (PackageRef, array, canonical, choice, digest, fail, fields,
+from .model import (PackageRef, package_version, array, canonical, choice, digest, fail, fields,
                     guarded, integer, loads, name, package_ref, read_json, sha256, text,
                     unique, version)
 from .model import (boolean, bounded_text, execution_document, execution_origin,
@@ -135,11 +135,11 @@ def validate_statement(statement: object, predicate_type: str) -> dict:
         sha256(fields(subject["annotations"], "sourceTreeDigest", "statement.subject.annotations")["sourceTreeDigest"],
                "statement.subject.annotations.sourceTreeDigest")
         fields(p, "purl releaseId", "statement.predicate")
-        identity = re.fullmatch(r"pkg:github/ourapps-ae/([a-z][a-z0-9-]*)@v([0-9]+\.[0-9]+\.[0-9]+)", text(p["purl"], "statement.predicate.purl"))
+        identity = re.fullmatch(r"pkg:github/ourapps-ae/([a-z][a-z0-9-]*)@v([0-9]+\.[0-9]+\.[0-9]+(?:-preview\.[0-9]+)?)", text(p["purl"], "statement.predicate.purl"))
         if identity is None:
             fail("invalid-value", "statement.predicate.purl")
         name(p["releaseId"], "statement.predicate.releaseId")
-        version(identity.group(2), "statement.predicate.purl")
+        package_version(identity.group(2), "statement.predicate.purl")
         return s
     if "annotations" in subject:
         fail("invalid-fields", "statement.subject")
