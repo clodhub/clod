@@ -32,7 +32,13 @@ Advisory ids are an upper-case prefix, a hyphen, then letters, digits, `.`, `:`,
 
 ## Package URLs
 
-Upstream `purl` and compatibility dependency names follow the package URL specification as the catalogue reads it: `pkg:` and a lower-case type, then the namespace segments the type needs, a non-empty name that does not start with `@`, and the version, each percent-decoded strictly. `maven`, `golang`, `github`, `bitbucket` and `composer` need at least one namespace segment, and `swift` at least two, the repository host and owner (`pkg:swift/github.com/owner/name@1.0.0`). `cargo`, `gem`, `pypi`, `nuget`, `hex`, `pub`, `cocoapods`, `hackage` and `conda` have none. An `npm` namespace is one scope (`pkg:npm/%40scope/name@1.0.0` or `pkg:npm/@scope/name@1.0.0`).
+Upstream `purl` and compatibility dependency names follow section 6a of the catalogue format paper, the rule the catalogue applies; `tests/fixtures/purl-cases.json` is the shared corpus, byte-identical with the catalogue's (sha256 `84e429d012f0931f6db2e67f2e4d2f61b76fab24b7a23a4e2ec6ea688563b470`).
+
+- The raw string is printable ASCII (0x21 to 0x7E), at most 1000 characters, `pkg:` then a lower-case type `[a-z][a-z0-9.+-]*`, `/`, the namespace segments, a name that is non-empty and does not start with `@`, an optional `@version`, `?qualifiers` and `#subpath`. It is split at the first `#`, then at the first `?`.
+- Every part is percent-decoded strictly as UTF-8 and holds no character of Unicode category Cc, Cf, Zs, Zl, Zp, Co or Cs. Empty versions and namespace segments are refused.
+- `maven`, `golang`, `github`, `bitbucket` and `composer` need at least one namespace segment; `swift` at least two, a host containing a dot and then an owner; `npm` at most one `@scope`. `cargo`, `gem`, `pypi`, `nuget`, `hex`, `pub`, `cocoapods`, `hackage` and `conda` have none.
+- Qualifiers are `key=value` pairs joined by `&`, split at the first `=`; keys are `[a-z][a-z0-9._-]*`, unique, with non-empty values. Subpath segments are joined by `/` and none is empty, `.` or `..`. A trailing `?` or `#` with nothing after it is refused.
+- `aepm.foundations.parse_purl(value)` returns `{type, namespace, name, version, qualifiers, subpath}` (qualifiers sorted by key, version null when absent), or None.
 
 ## Package foundations
 

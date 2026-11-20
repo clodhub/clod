@@ -295,6 +295,20 @@ class RecipeDocumentTests(unittest.TestCase):
 class PurlTests(unittest.TestCase):
     """The package URL rule the catalogue applies (shared/src/foundations.ts parsePurl)."""
 
+    CORPUS_SHA256 = "84e429d012f0931f6db2e67f2e4d2f61b76fab24b7a23a4e2ec6ea688563b470"
+
+    def test_the_shared_corpus(self):
+        import hashlib
+        import json
+        from aepm.foundations import parse_purl
+        raw = (Path(__file__).parent / "fixtures/purl-cases.json").read_bytes()
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), self.CORPUS_SHA256)
+        cases = json.loads(raw)
+        self.assertEqual((len(cases), sum(case["accept"] for case in cases)), (2069, 1905))
+        wrong = [case["purl"] for case in cases if (parse_purl(case["purl"]) if case["accept"] else None) != (case.get("parts") if case["accept"] else None)
+                 or (parse_purl(case["purl"]) is None) == case["accept"]]
+        self.assertEqual(wrong, [])
+
     def test_package_urls_follow_the_specification(self):
         from aepm.foundations import _purl, parse_purl
         for value in ("pkg:npm/left-pad@1.3.0", "pkg:npm/%40angular/core@17.0.0", "pkg:npm/@angular/core@17.0.0",
@@ -303,7 +317,7 @@ class PurlTests(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertIsNotNone(parse_purl(value))
         self.assertEqual(parse_purl("pkg:npm/%40angular/core@17.0.0"),
-                         {"type": "npm", "namespace": ["@angular"], "name": "core", "version": "17.0.0"})
+                         {"type": "npm", "namespace": ["@angular"], "name": "core", "version": "17.0.0", "qualifiers": {}, "subpath": []})
         for value in ("pkg:npm/@1.3.0", "pkg:swift/client-sdk-swift@2.19.0", "pkg:npm/", "npm/left-pad@1.3.0", "pkg:maven/lib@1.0",
                       "pkg:swift/lib@1.0", "pkg:swift/vapor/vapor@4.0.0", "pkg:pypi/acme/requests@1.0", "pkg:NPM/left-pad@1.0",
                       "pkg:npm/a//b@1.0", "pkg:npm/left pad@1.0", "pkg:npm/%E0%A4%A@1.0", "pkg:npm/a/b/c@1.0"):
