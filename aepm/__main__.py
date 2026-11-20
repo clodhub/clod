@@ -40,6 +40,7 @@ def parser():
         if command == "propose-update":
             child.add_argument("definition", nargs="?")
             child.add_argument("--channel", choices=("security", "features", "preview"))
+            child.add_argument("--update-policy")
             child.add_argument("--from", dest="origin", default="https://ourapps.app")
         if command in ("verify", "review", "propose-update"):
             child.add_argument("--trusted", action="store_true")
@@ -273,13 +274,19 @@ def dispatch(args):
         from .update import propose
         if (args.definition is None) == (args.channel is None):
             fail("arguments", "propose-update")
+        skipped = []
         if args.channel is not None:
             from .channels import next_definition
-            definition = next_definition(Path(args.app), args.channel, Path(args.store), args.origin)
+            definition, skipped = next_definition(Path(args.app), args.channel, Path(args.store), args.origin)
         else:
             definition = validate_definition(load(args.definition))
+        policy = None
+        if args.update_policy is not None:
+            from .application import parse_update_policy
+            policy = parse_update_policy(args.update_policy)
         result = propose(Path(args.app), definition, Path(args.store), Path(args.policy), args.trusted,
-                         allow_network=args.allow_network, channel=args.channel, **execution_options)
+                         allow_network=args.allow_network, channel=args.channel, skipped=skipped, update_policy=policy,
+                         **execution_options)
         write(args.out, result)
         return result
     if command == "approve":

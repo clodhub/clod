@@ -36,7 +36,8 @@ def category(value: object, path: str) -> str:
 
 @guarded
 def validate_categories(value: object, class_categories=()) -> list[dict]:
-    """classes/categories.json: unique ids, each parent present, no cycles, and each given class category present."""
+    """classes/categories.json: unique ids, each parent the id less its last segment (null at the top) and present, and each
+    given class category present."""
     document = fields(value, "format categories", "categories")
     if type(document["format"]) is not int or document["format"] != 1:
         fail("invalid-format", "categories")
@@ -45,8 +46,9 @@ def validate_categories(value: object, class_categories=()) -> list[dict]:
         fields(entry, "id title parent", "categories.categories")
         category(entry["id"], "categories.id")
         bounded_text(entry["title"], "categories.title")
-        if entry["parent"] is not None:
-            category(entry["parent"], "categories.parent")
+        expected = entry["id"].rpartition("/")[0] or None
+        if entry["parent"] != expected:
+            fail("category-parent", entry["id"])
     unique([entry["id"] for entry in entries], "categories.id")
     parents = {entry["id"]: entry["parent"] for entry in entries}
     for entry in entries:

@@ -17,16 +17,27 @@ def webp(chunk, body):
     return b"RIFF" + struct.pack("<I", len(payload)) + payload
 
 
+def vp8_body(width, height):
+    # A shown key frame whose first partition is 8 bytes.
+    return b"\x10\x01\x00" + b"\x9d\x01\x2a" + struct.pack("<HH", width, height) + b"\x00" * 8
+
+
 def vp8(width, height):
-    return webp(b"VP8 ", b"\x10\x02\x00" + b"\x9d\x01\x2a" + struct.pack("<HH", width, height) + b"\x00" * 8)
+    return webp(b"VP8 ", vp8_body(width, height))
 
 
 def vp8l(width, height):
     return webp(b"VP8L", b"\x2f" + struct.pack("<I", (width - 1) | ((height - 1) << 14)) + b"\x00" * 4)
 
 
-def vp8x(width, height):
-    return webp(b"VP8X", b"\x00\x00\x00\x00" + (width - 1).to_bytes(3, "little") + (height - 1).to_bytes(3, "little"))
+def chunk(kind, body):
+    return kind + struct.pack("<I", len(body)) + body + (b"\x00" if len(body) % 2 else b"")
+
+
+def vp8x(width, height, *chunks):
+    header = b"\x10\x00\x00\x00" + (width - 1).to_bytes(3, "little") + (height - 1).to_bytes(3, "little")
+    payload = b"WEBP" + chunk(b"VP8X", header) + b"".join(chunks or (chunk(b"ALPH", b"\x00" * 5), chunk(b"VP8 ", vp8_body(width, height))))
+    return b"RIFF" + struct.pack("<I", len(payload)) + payload
 
 
 class Base(unittest.TestCase):
@@ -146,9 +157,24 @@ class ImageTests(Base):
         self.assertEqual(image_size(vp8(640, 480), "a.webp"), ("webp", 640, 480))
         self.assertEqual(image_size(vp8l(1280, 800), "a.webp"), ("webp", 1280, 800))
         self.assertEqual(image_size(vp8x(4000, 3000), "a.webp"), ("webp", 4000, 3000))
-        for data in (b"GIF89a" + b"\x00" * 40, png(2, 2)[:20], vp8(10, 10)[:-4], webp(b"VP8 ", b"\x11\x02\x00\x9d\x01\x2a\x0a\x00\x0a\x00"),
-                     webp(b"VP8L", b"\x00" * 5), webp(b"ALPH", b"\x00" * 10)):
-            with self.subTest(data=data[:16]), self.assertRaises(AepmError):
+        good = png(3, 2)
+        idat = good.index(b"IDAT") - 4
+        no_idat = good[:idat] + good[good.index(b"IEND") - 4:]
+        bad_crc = bytearray(good)
+        bad_crc[idat + 9] ^= 1
+        vp8l_version = webp(b"VP8L", b"\x2f" + struct.pack("<I", 9 | (9 << 14) | (1 << 29)) + b"\x00" * 4)
+        for name, data in (("gif", b"GIF89a" + b"\x00" * 40), ("short png", good[:20]), ("png crc", bytes(bad_crc)),
+                           ("png without image data", no_idat), ("png after its end", good + b"\x00"),
+                           ("png without end", good[:good.index(b"IEND") - 4]),
+                           ("webp truncated", vp8(10, 10)[:-4]), ("webp riff size", vp8(10, 10) + b"\x00\x00"),
+                           ("vp8 not a key frame", webp(b"VP8 ", b"\x11" + vp8_body(10, 10)[1:])),
+                           ("vp8 partition past the chunk", webp(b"VP8 ", b"\x10\x08\x00" + vp8_body(10, 10)[3:])),
+                           ("vp8l signature", webp(b"VP8L", b"\x00" * 5)), ("vp8l version", vp8l_version),
+                           ("alpha only", webp(b"ALPH", b"\x00" * 10)),
+                           ("vp8x without image data", vp8x(8, 8, chunk(b"ALPH", b"\x00" * 5))),
+                           ("vp8x size disagrees", vp8x(8, 8, chunk(b"VP8 ", vp8_body(9, 8)))),
+                           ("vp8x animation", vp8x(8, 8, chunk(b"ANIM", b"\x00" * 6), chunk(b"VP8 ", vp8_body(8, 8))))):
+            with self.subTest(name=name), self.assertRaises(AepmError):
                 image_size(data, "image")
 
     def test_listed_images_must_match_their_files(self):
@@ -224,8 +250,12 @@ class ClassTests(Base):
         validate_categories(good, ["games/cards", "media"])
         for code, document, classes in (
                 ("duplicate-value", tree(("games", None), ("games", None)), ()),
-                ("category-unknown", tree(("games/cards", "games")), ()),
-                ("category-cycle", tree(("a", "b"), ("b", "a")), ()),
+                ("category-unknown", tree(("games", None), ("games/cards/poker", "games/cards")), ()),
+                ("category-unknown", tree(("games/cards", "games"),), ()),
+                ("category-parent", tree(("a", "b"), ("b", "a")), ()),
+                ("category-parent", tree(("games", None), ("games/cards", None)), ()),
+                ("category-parent", tree(("games", None), ("media", None), ("games/cards", "media")), ()),
+                ("category-parent", tree(("games", "games"),), ()),
                 ("category-unknown", good, ["games/dice"]),
                 ("invalid-category", tree(("Games", None)), ()),
                 ("invalid-format", {"format": 2, "categories": []}, ()),

@@ -68,7 +68,7 @@ def tree_digest(root, assembly):
 @guarded
 def propose(root: Path, definition, store: Path, policy: Path, trusted: bool, *, allow_network: bool = False,
             execution_context=None, authorization=None, execution_state=None, secrets=None, allow_live=False,
-            tool_selection=None, adoption_root=None, channel=None) -> Proposal:
+            tool_selection=None, adoption_root=None, channel=None, skipped=(), update_policy=None) -> Proposal:
     from .bundle import resolve
     from .private_process import adoption_root as validate_adoption_root
     from .tool_selection import require_selection
@@ -77,9 +77,12 @@ def propose(root: Path, definition, store: Path, policy: Path, trusted: bool, *,
     adoption_root = validate_adoption_root(adoption_root)
 
     root = Path(root).absolute()
-    definition = validate_definition(definition)
+    definition = dict(validate_definition(definition))
     if trusted is not True:
         fail("trusted-execution-required", TRUSTED)
+    # The installed update policy carries over unless the caller sets one for this update.
+    definition["updatePolicy"] = update_policy if update_policy is not None else validate_definition(load(root / ".aepm/definition.json"))["updatePolicy"]
+    definition = validate_definition(definition)
     with transaction(root) as directory:
         if (directory / "journal.json").exists() or (directory / "backup").exists():
             fail("pending-recovery-or-cleanup", "transaction")
@@ -182,7 +185,7 @@ def propose(root: Path, definition, store: Path, policy: Path, trusted: bool, *,
             next_files = {item["path"]: item["digest"] for item in next_assembly["files"]}
             changes = [{"path": path, "before": previous_files.get(path), "after": next_files.get(path)}
                        for path in sorted(previous_files.keys() | next_files.keys()) if previous_files.get(path) != next_files.get(path)]
-            proposal = {"format": PROPOSAL_FORMAT, "channel": channel, "updatePolicy": definition["updatePolicy"],
+            proposal = {"format": PROPOSAL_FORMAT, "channel": channel, "updatePolicy": definition["updatePolicy"], "skipped": list(skipped),
                         "application": definition["id"], "previousLockDigest": digest(canonical(previous["lock"])),
                         "nextLockDigest": digest(canonical(lock)), "configurationDigest": digest(canonical(next_assembly["configuration"])),
                         "designDigest": digest(canonical(next_assembly["design"])), "assemblyDigest": digest(canonical(next_assembly)),
@@ -198,7 +201,7 @@ def proposal_context(path):
     proposal = load(path)
     if type(proposal) is dict and proposal.get("format") == 1:
         fail("proposal-format-outdated", "proposal")
-    fields(proposal, ("format", "channel", "updatePolicy", *BINDINGS, "stage", "changes"))
+    fields(proposal, ("format", "channel", "updatePolicy", "skipped", *BINDINGS, "stage", "changes"))
     if proposal["format"] != PROPOSAL_FORMAT or proposal["channel"] not in (None, "security", "features", "preview"):
         fail("invalid-format", "proposal")
     stage = Path(proposal["stage"])

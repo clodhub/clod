@@ -29,6 +29,24 @@ class ChannelTests(unittest.TestCase):
         manifest["release"] = {"channel": "security", "fixes": ["GHSA-deck-0001-test"]}
         (cls.root / "deck2-security" / "component.json").write_bytes(canonical(manifest))
         pack(cls.root / "deck2-security", cls.store)
+        # host 0.1.1: a security release of the component the recipe's job places in the host slot.
+        manifest = component(cls.root / "host-security", "host", collect=design.HOST_SETTINGS, profiles=design.HOST_PROFILES)
+        manifest["identity"]["version"] = "0.1.1"
+        manifest["release"] = {"channel": "security", "fixes": ["CVE-2026-0001"]}
+        (cls.root / "host-security" / "component.json").write_bytes(canonical(manifest))
+        pack(cls.root / "host-security", cls.store)
+        # deck2 0.1.2: a security release that implements a newer deck class, so it no longer fits the deck slot.
+        manifest = json.loads((cls.root / "deck2-security" / "component.json").read_text())
+        source = cls.root / "deck2-other-class"
+        shutil.copytree(cls.root / "deck2-security", source)
+        other = copy.deepcopy(SLOT_CLASSES["deck"])
+        other["descriptor"]["version"] = "1.1.0"
+        other["reference"] = {"name": other["descriptor"]["name"], "version": "1.1.0", "digest": digest(canonical(other["descriptor"]))}
+        manifest.update(classes=[other], implements=[other["reference"]])
+        manifest["identity"]["version"] = "0.1.2"
+        manifest["release"] = {"channel": "security", "fixes": ["GHSA-deck-0002-test"]}
+        (source / "component.json").write_bytes(canonical(manifest))
+        cls.unfit = pack(source, cls.store)
         # game 0.2.0: a features release with the same slot classes; game 0.3.0-preview.1: its deck slot needs a new
         # class version that deck2 does not implement.
         cls.recipe("0.2.0", RECIPE)
@@ -61,6 +79,7 @@ class ChannelTests(unittest.TestCase):
         cls.origin = f"http://127.0.0.1:{cls.server.server_port}"
         Catalogue.routes = {}
         listed = {}
+        cls.unlisted = {}
         for ref in json.loads((cls.store / "catalogue.json").read_text())["entries"]:
             manifest, _ = read_package(ref, cls.store)
             kind = "recipes" if manifest["kind"] == "recipe" else "components"
@@ -69,6 +88,9 @@ class ChannelTests(unittest.TestCase):
             Catalogue.routes[base] = {"name": ref["name"], "version": ref["version"], "digest": "sha256:" + ref["digest"]}
             Catalogue.routes[base + "/bundle"] = {"digest": "sha256:" + ref["digest"], "url": f"{cls.origin}/dl/{ref['digest']}"}
             Catalogue.routes[f"/dl/{ref['digest']}"] = (cls.store / "objects" / (ref["digest"] + ".tar")).read_bytes()
+            if ref == cls.unfit:
+                cls.unlisted[f"/api/{kind}/{short}/latest"] = {"version": ref["version"], **manifest["release"]}
+                continue
             listed.setdefault((kind, short, ref["name"]), []).append({"version": ref["version"], **manifest["release"]})
         for (kind, short, name), versions in listed.items():
             Catalogue.routes[f"/api/{kind}/{short}/latest"] = {"name": name, "versions": versions}
@@ -85,9 +107,10 @@ class ChannelTests(unittest.TestCase):
         self.addCleanup(setattr, Catalogue, "routes", self.routes)
         world = World.from_store("ourapps-ae/game", "0.1.0", self.store, {"deck": ("ourapps-ae/deck2", "0.1.0")})
         self.definition = evaluate(world, {})["design"]
-        self.app = Path(self.temp.name) / ("app-" + self.id().rsplit(".", 1)[1])
+        base = Path(self.temp.name).resolve()
+        self.app = base / ("app-" + self.id().rsplit(".", 1)[1])
         write(self.app / ".aepm/definition.json", self.definition)
-        self.fresh = Path(self.temp.name) / ("store-" + self.id().rsplit(".", 1)[1])
+        self.fresh = base / ("store-" + self.id().rsplit(".", 1)[1])
         patcher = patch("aepm.application.read_assembly")
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -110,15 +133,36 @@ class ChannelTests(unittest.TestCase):
 
     def test_security_moves_every_package_on_its_line(self):
         from aepm.channels import next_definition
-        nxt = next_definition(self.app, "security", self.fresh, self.origin)
-        self.assertEqual(nxt["recipe"], self.definition["recipe"])
-        self.assertEqual({item["name"]: item["version"] for item in nxt["components"]}["ourapps-ae/deck2"], "0.1.1")
+        nxt, skipped = next_definition(self.app, "security", self.fresh, self.origin)
+        self.assertEqual((nxt["recipe"], skipped), (self.definition["recipe"], []))
+        versions = {item["name"]: item["version"] for item in nxt["components"]}
+        self.assertEqual((versions["ourapps-ae/deck2"], versions["ourapps-ae/host"]), ("0.1.1", "0.1.1"))
+        self.assertEqual((nxt["selections"]["deck"]["version"], nxt["selections"]["server"]["version"]), ("0.1.1", "0.1.1"))
         self.assertEqual(nxt["updatePolicy"], self.definition["updatePolicy"])
+
+    def test_a_security_release_of_another_class_version_is_skipped_with_its_reason(self):
+        from aepm.channels import next_definition
+        path, entry = next(iter(self.unlisted.items()))
+        Catalogue.routes[path]["versions"].append(entry)
+        nxt, skipped = next_definition(self.app, "security", self.fresh, self.origin)
+        self.assertEqual({item["name"]: item["version"] for item in nxt["components"]}["ourapps-ae/deck2"], "0.1.0")
+        self.assertEqual([(item["name"], item["version"], item["slot"]) for item in skipped], [("ourapps-ae/deck2", "0.1.2", "deck")])
+        self.assertTrue(any(reason.startswith("class-") for reason in skipped[0]["reasons"]), skipped)
+
+    def test_features_after_security_keeps_the_installed_security_releases(self):
+        from aepm.channels import next_definition
+        secured, _ = next_definition(self.app, "security", self.fresh, self.origin)
+        write(self.app / ".aepm/definition.json", secured)
+        nxt, _ = next_definition(self.app, "features", self.fresh, self.origin)
+        self.assertEqual(nxt["recipe"]["version"], "0.2.0")
+        versions = {item["name"]: item["version"] for item in nxt["components"]}
+        self.assertEqual((versions["ourapps-ae/deck2"], versions["ourapps-ae/host"]), ("0.1.1", "0.1.1"))
+        self.assertEqual((nxt["selections"]["deck"]["version"], nxt["selections"]["server"]["version"]), ("0.1.1", "0.1.1"))
 
     def test_features_keeps_answers_and_substitutes(self):
         from aepm.channels import next_definition
         self.policy(features="manual")
-        nxt = next_definition(self.app, "features", self.fresh, self.origin)
+        nxt, _ = next_definition(self.app, "features", self.fresh, self.origin)
         self.assertEqual(nxt["recipe"]["version"], "0.2.0")
         self.assertEqual({item["id"]: item["name"] for item in nxt["components"]}["deck"], "ourapps-ae/deck2")
 

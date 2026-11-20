@@ -87,28 +87,75 @@ def outdated(root: Path, origin: str) -> list[dict]:
     return result
 
 
+def _package(store: Path, package: str, number: str):
+    """A stored package as the recipe evaluator sees it."""
+    from .bundle import read_package
+    from .model import loads
+    from .recipe import Package
+    entries = {(e["name"], e["version"]): e for e in loads((Path(store) / "catalogue.json").read_bytes(), "catalogue")["entries"]}
+    manifest, payloads = read_package(entries[(package, number)], store)
+    return Package(manifest, payloads.__getitem__)
+
+
+def _slot_world(store: Path, definition: dict):
+    """The recipe the definition names, with its recorded substitutes, and the targets its answers select."""
+    from .foundations import selected_targets
+    from .recipe import World
+    substitutes = {slot: (item["component"], item["version"]) for slot, item in definition.get("selections", {}).items()
+                   if type(item) is dict and item.get("reason") == "substituted"}
+    world = World.from_store(definition["recipe"]["name"], definition["recipe"]["version"], store, substitutes)
+    return world, selected_targets(world.application, definition.get("answers", {}))
+
+
+def _record(definition: dict, package: str, old: str, new: str) -> None:
+    """Point the definition's component entry and every selection of this package at its new version."""
+    for item in definition["components"]:
+        if item["name"] == package and item["version"] == old:
+            item["version"] = new
+    for item in definition.get("selections", {}).values():
+        if type(item) is dict and item.get("component") == package and item.get("version") == old:
+            item["version"] = new
+
+
 @guarded
-def next_definition(root: Path, channel: str, store: Path, origin: str) -> dict:
-    """The design an update on `channel` installs, with every package it needs fetched into the store."""
+def next_definition(root: Path, channel: str, store: Path, origin: str) -> tuple[dict, list[dict]]:
+    """The design an update on `channel` installs, with every package it needs fetched into the store, and the security
+    releases left out with the reason each one does not fit its slot."""
     from .application import read_assembly, validate_definition
     from .fetch import fetch
     from .io import load
+    from .recipe import slot_fit
     read_assembly(root)
     current = validate_definition(load(Path(root) / ".aepm/definition.json"))
     if current["updatePolicy"][channel] == "hold":
         fail("channel-held", channel)
+    skipped = []
     if channel == "security":
         nxt, moved = deepcopy(current), False
-        for item in [nxt["recipe"], *nxt["components"]]:
+        recipe = nxt["recipe"]
+        versions = published_versions(recipe["name"], origin)
+        offered = newest(recipe["version"], list(versions), "security")
+        if offered is not None:
+            _release(store, recipe["name"], offered, origin, versions[offered])
+            recipe["version"], moved = offered, True
+        fetch(store, _installed(nxt), with_dependencies=True, origin=origin)
+        world, targets = _slot_world(store, nxt)
+        for item in list(nxt["components"]):
             versions = published_versions(item["name"], origin)
             offered = newest(item["version"], list(versions), "security")
-            if offered is not None:
-                _release(store, item["name"], offered, origin, versions[offered])
-                item["version"], moved = offered, True
+            if offered is None:
+                continue
+            _release(store, item["name"], offered, origin, versions[offered])
+            reasons = slot_fit(world, item["id"], _package(store, item["name"], offered), targets)
+            if reasons:
+                skipped.append({"name": item["name"], "version": offered, "slot": item["id"], "reasons": reasons})
+                continue
+            _record(nxt, item["name"], item["version"], offered)
+            moved = True
         if not moved:
-            fail("no-update", channel)
+            fail("no-update", channel, detail={"skipped": skipped})
         fetch(store, _installed(nxt), with_dependencies=True, origin=origin)
-        return validate_definition(nxt)
+        return validate_definition(nxt), skipped
     recipe = current["recipe"]["name"]
     versions = published_versions(recipe, origin)
     offered = newest(current["recipe"]["version"], list(versions), channel)
@@ -128,4 +175,17 @@ def next_definition(root: Path, channel: str, store: Path, origin: str) -> dict:
         raise AepmError(result["errors"][0]["code"], result["errors"][0]["path"], detail={"errors": result["errors"]})
     design = result["design"]
     design["updatePolicy"] = deepcopy(current["updatePolicy"])
-    return validate_definition(design)
+    # A package never goes below its installed release on the same line: an installed security release newer than the
+    # recipe's pin stays, if it fits its slot in the new recipe.
+    installed = {item["name"]: item["version"] for item in current["components"]}
+    world, targets = _slot_world(store, design)
+    for item in list(design["components"]):
+        kept = installed.get(item["name"])
+        if kept is None or version_key(kept)[:2] != version_key(item["version"])[:2] or version_key(kept) <= version_key(item["version"]):
+            continue
+        fetch(store, [(item["name"], kept)], with_dependencies=True, origin=origin)
+        reasons = slot_fit(world, item["id"], _package(store, item["name"], kept), targets)
+        if reasons:
+            fail("installed-release-unfit", item["id"], detail={"name": item["name"], "version": kept, "reasons": reasons})
+        _record(design, item["name"], item["version"], kept)
+    return validate_definition(design), skipped

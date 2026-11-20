@@ -354,6 +354,11 @@ class RecipeDesignTests(unittest.TestCase):
         write(answers, {"video": True, "targets": ["web"]})
         code, value = self.command("questions", "game@0.1.0", "--store", self.store, "--answers", answers)
         self.assertEqual((value["result"]["toAsk"], value["result"]["followUps"]), (["videoKey"], []))
+        for partial, path in (({"scale": "huge"}, "answers.scale"), ({"video": "yes"}, "answers.video"),
+                              ({"targets": ["web", "tv"]}, "answers.targets"), ({"colour": "red"}, "answers.colour")):
+            write(answers, partial)
+            code, value = self.command("questions", "game@0.1.0", "--store", self.store, "--answers", answers)
+            self.assertEqual((code, value["error"]["code"], value["error"]["path"]), (1, "invalid-answer", path))
         code, value = self.command("design", "deck@0.1.0", "--store", self.store, "--out", self.root / "x.json")
         self.assertEqual((code, value["error"]["code"]), (1, "not-a-recipe"))
         code, value = self.command("questions", "game@9.9.9", "--store", self.store)

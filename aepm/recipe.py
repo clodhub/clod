@@ -257,6 +257,13 @@ def questions(recipe, world=None, answers=None):
         return out
     answers = dict(answers or {})
     evaluation = _Evaluation(world, answers, None)
+    from .model import fail
+    for qid, value in answers.items():
+        if qid not in evaluation.questions:
+            fail("invalid-answer", f"answers.{qid}")
+        evaluation.checked(evaluation.questions[qid], value)
+        if evaluation.errors:
+            fail(evaluation.errors[0]["code"], evaluation.errors[0]["path"])
     to_ask, follow_ups = [], []
     for q in recipe["questions"]:
         if q["id"] in answers:

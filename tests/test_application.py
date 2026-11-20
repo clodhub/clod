@@ -217,6 +217,17 @@ class ApplicationTests(unittest.TestCase):
         with self.assertRaises(AepmError):
             verify_application(self.app, self.policy, True)
 
+    def test_a_written_next_design_keeps_the_installed_update_policy(self):
+        installed = load(self.app / ".aepm/definition.json")["updatePolicy"]
+        self.definition["components"][0]["version"] = "0.1.1"
+        self.definition["updatePolicy"] = {"security": "hold", "features": "hold", "preview": "auto"}
+        value = update.propose(self.app, self.definition, self.store, self.policy, True)
+        self.assertEqual(value["updatePolicy"], installed)
+        self.assertEqual(load(Path(value["stage"]) / ".aepm/definition.json")["updatePolicy"], installed)
+        chosen = {"security": "manual", "features": "manual", "preview": "hold"}
+        value = update.propose(self.app, self.definition, self.store, self.policy, True, update_policy=chosen)
+        self.assertEqual((value["updatePolicy"], value["skipped"]), (chosen, []))
+
     def test_update_preserves_unmanaged_and_keeps_backup(self):
         self.app.chmod(DIRECTORY_MODE)
         (self.app / "notes.txt").write_text("keep me")
