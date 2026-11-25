@@ -10,7 +10,7 @@ from typing import Any, cast
 from pathlib import Path
 import subprocess
 
-from .model import (PackageRef, package_version, array, canonical, choice, digest, fail, fields,
+from .model import (SCOPE, PackageRef, package_version, array, canonical, choice, digest, fail, fields,
                     guarded, integer, loads, name, package_ref, read_json, sha256, text,
                     unique, version)
 from .model import (boolean, bounded_text, execution_document, execution_origin,
@@ -25,11 +25,11 @@ PAYLOAD_TYPE = "application/vnd.in-toto+json"
 STATEMENT_TYPE = "https://in-toto.io/Statement/v1"
 RELEASE = "https://in-toto.io/attestation/release/v0.1"
 REVIEW = "https://slsa.dev/verification_summary/v1"
-UPDATE_APPROVAL = "https://ourapps.app/attestation/update-approval/v1"
-EXECUTION_AUTHORIZATION = "https://ourapps.app/attestation/execution-authorization/v1"
+UPDATE_APPROVAL = "https://clodhub.com/attestation/update-approval/v1"
+EXECUTION_AUTHORIZATION = "https://clodhub.com/attestation/execution-authorization/v1"
 PREDICATES = {"release": (RELEASE,), "guardian": (REVIEW,), "owner": (UPDATE_APPROVAL, EXECUTION_AUTHORIZATION)}
-GUARDIAN_VERIFIER = "https://ourapps.app/verifier/aepm-guardian-review"
-GUARDIAN_POLICY = "https://ourapps.app/policy/aepm-guardian-review/v1"
+GUARDIAN_VERIFIER = "https://clodhub.com/verifier/aepm-guardian-review"
+GUARDIAN_POLICY = "https://clodhub.com/policy/aepm-guardian-review/v1"
 SCOPE_LEVELS = {"required-local": "AEPM_REQUIRED_LOCAL", "platform": "AEPM_PLATFORM", "deployed": "AEPM_DEPLOYED"}
 DEPENDENCY_LEVEL = "AEPM_RELEASED"
 UPDATE_BINDINGS = ("application", "previousLockDigest", "nextLockDigest", "configurationDigest", "designDigest",
@@ -135,7 +135,7 @@ def validate_statement(statement: object, predicate_type: str) -> dict:
         sha256(fields(subject["annotations"], "sourceTreeDigest", "statement.subject.annotations")["sourceTreeDigest"],
                "statement.subject.annotations.sourceTreeDigest")
         fields(p, "purl releaseId", "statement.predicate")
-        identity = re.fullmatch(r"pkg:github/ourapps-ae/([a-z][a-z0-9-]*)@v([0-9]+\.[0-9]+\.[0-9]+(?:-preview\.[0-9]+)?)", text(p["purl"], "statement.predicate.purl"))
+        identity = re.fullmatch(rf"pkg:github/{SCOPE}/([a-z][a-z0-9-]*)@v([0-9]+\.[0-9]+\.[0-9]+(?:-preview\.[0-9]+)?)", text(p["purl"], "statement.predicate.purl"))
         if identity is None:
             fail("invalid-value", "statement.predicate.purl")
         name(p["releaseId"], "statement.predicate.releaseId")

@@ -55,13 +55,13 @@ class OptionalPortTests(unittest.TestCase):
             renderer.validate_design(value)
 
     def test_projected_port_follows_manifest_optional_flag(self):
-        base = {"id": "ourapps-ae.sample", "name": "Sample", "kind": "component", "status": "example", "package": "ourapps-ae/sample",
+        base = {"id": "clodhub.sample", "name": "Sample", "kind": "component", "status": "example", "package": "clodhub/sample",
                 "version": "0.1.0", "settings": [],
                 "ports": [{"id": "rules", "name": "Rules", "direction": "input", "kind": "interface", "type": "ae/contract",
                            "version": "1.0.0", "required": False, "cardinality": "one"}]}
         manifest = {"kind": "component", "visual": {"definition": "visual.json"}, "collect": [], "provides": [],
                     "requires": [{"id": "rules", "type": "ae/contract", "version": "1.0.0", "path": "interface.txt"}]}
-        ref = {"name": "ourapps-ae/sample", "version": "0.1.0", "digest": "a" * 64}
+        ref = {"name": "clodhub/sample", "version": "0.1.0", "digest": "a" * 64}
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "visual.json").write_text(json.dumps(base))

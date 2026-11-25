@@ -16,7 +16,7 @@
       ]
     },
     {
-      "id": "rooms", "name": "Realtime rooms", "kind": "component", "status": "proposed", "package": "ourapps-ae/realtime-rooms", "version": "0.1.0",
+      "id": "rooms", "name": "Realtime rooms", "kind": "component", "status": "proposed", "package": "clodhub/realtime-rooms", "version": "0.1.0",
       "ports": [
         {"id": "rules", "name": "Rules contract", "direction": "input", "kind": "interface", "type": "ae/game-rules", "version": "1.0.0", "required": true, "cardinality": "one"},
         {"id": "metrics", "name": "Optional room observer", "direction": "input", "kind": "interface", "type": "ae/room-observer", "version": "1.0.0", "required": false, "cardinality": "many"},
@@ -28,7 +28,7 @@
       ]
     },
     {
-      "id": "clients", "name": "Poker client shell", "kind": "component", "status": "proposed", "package": "ourapps-ae/game-client", "version": "0.1.0",
+      "id": "clients", "name": "Poker client shell", "kind": "component", "status": "proposed", "package": "clodhub/game-client", "version": "0.1.0",
       "ports": [
         {"id": "room", "name": "Join and observe room", "direction": "input", "kind": "interface", "type": "ae/room-session", "version": "1.0.0", "required": true, "cardinality": "one"},
         {"id": "words", "name": "Translated messages", "direction": "input", "kind": "setting", "type": "ae/message-catalog", "version": "1.0.0", "required": true, "cardinality": "one"},
@@ -41,7 +41,7 @@
       ]
     },
     {
-      "id": "translations", "name": "Translation catalog", "kind": "component", "status": "proposed", "package": "ourapps-ae/translations", "version": "0.1.0",
+      "id": "translations", "name": "Translation catalog", "kind": "component", "status": "proposed", "package": "clodhub/translations", "version": "0.1.0",
       "ports": [
         {"id": "words", "name": "Message catalog", "direction": "output", "kind": "setting", "type": "ae/message-catalog", "version": "1.0.0"}
       ],
@@ -50,7 +50,7 @@
       ]
     },
     {
-      "id": "updates", "name": "Approved app updates", "kind": "component", "status": "proposed", "package": "ourapps-ae/app-updates", "version": "0.1.0",
+      "id": "updates", "name": "Approved app updates", "kind": "component", "status": "proposed", "package": "clodhub/app-updates", "version": "0.1.0",
       "ports": [
         {"id": "feed", "name": "Approved releases", "direction": "output", "kind": "interface", "type": "ae/update-feed", "version": "1.0.0"}
       ],

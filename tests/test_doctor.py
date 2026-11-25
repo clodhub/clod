@@ -40,7 +40,7 @@ def package(root, name, toolchains, *, recipe=False, dependencies=None):
     if recipe:
         manifest.update(kind="recipe", implements=[], classes=[])
         manifest["artefacts"][0]["destination"] = "run.sh"
-        write(root / "recipe.json", {"format": 2, "name": "ourapps-ae/" + name, "version": "0.1.0", "title": "Game", "components": [],
+        write(root / "recipe.json", {"format": 2, "name": "clodhub/" + name, "version": "0.1.0", "title": "Game", "components": [],
                                       "questions": QUESTIONS, "connections": [], "tests": {"defaultAnswers": {}, "answerSets": []}})
         manifest["files"].append({"path": "recipe.json", "executable": False})
         manifest["files"].sort(key=lambda item: item["path"])
@@ -79,12 +79,12 @@ class DoctorTests(unittest.TestCase):
     def build(self):
         package(self.root / "renderer", "renderer", self.component_tools)
         package(self.root / "game", "game", {"web": [NODE], "ios": [XCODE]}, recipe=True,
-                dependencies=[{"name": "ourapps-ae/renderer", "version": "0.1.0"}])
+                dependencies=[{"name": "clodhub/renderer", "version": "0.1.0"}])
         pack(self.root / "renderer", self.store)
         pack(self.root / "game", self.store)
 
     def run_doctor(self, host, answers=None, **options):
-        return doctor("ourapps-ae/game", "0.1.0", self.store, answers or {}, host="macos", which=host.which, runner=host.run,
+        return doctor("clodhub/game", "0.1.0", self.store, answers or {}, host="macos", which=host.which, runner=host.run,
                       installer=host.install, **options)
 
     def test_versions_parse_from_real_output_shapes(self):
@@ -132,7 +132,7 @@ class DoctorTests(unittest.TestCase):
         self.build()
         host = Host({})
         for name, expected in (("windows", None), ("linux", ["sudo", "apt-get", "install", "--yes", "xcodegen"])):
-            report = doctor("ourapps-ae/game", "0.1.0", self.store, {}, host=name, which=host.which, runner=host.run)
+            report = doctor("clodhub/game", "0.1.0", self.store, {}, host=name, which=host.which, runner=host.run)
             self.assertEqual(next(item for item in report["tools"] if item["name"] == "xcodegen")["install"], expected)
 
     def test_conflicting_ranges_and_definitions_are_errors(self):
@@ -141,8 +141,8 @@ class DoctorTests(unittest.TestCase):
         with self.assertRaisesRegex(AepmError, "toolchain-conflict"):
             self.run_doctor(Host({}))
         conflicting = {**NODE, "probe": ["node", "-v"]}
-        first = {"identity": {"name": "ourapps-ae/a"}, "toolchains": {"web": [NODE]}}
-        second = {"identity": {"name": "ourapps-ae/b"}, "toolchains": {"web": [conflicting]}}
+        first = {"identity": {"name": "clodhub/a"}, "toolchains": {"web": [NODE]}}
+        second = {"identity": {"name": "clodhub/b"}, "toolchains": {"web": [conflicting]}}
         with self.assertRaisesRegex(AepmError, "toolchain-definition-conflict"):
             merge_toolchains([first, second])
         self.assertEqual([item["name"] for item in merge_toolchains([first, second], ["ios"])], [])

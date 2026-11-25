@@ -34,9 +34,9 @@ def source(root, name, version="0.1.0", recipe=False):
     manifest["verification"][1]["requirements"] = ["external:native-host"]
     manifest["kind"] = "recipe" if recipe else "component"
     manifest["collect"] = [{"id": "count", "type": "integer", "grammar": "integer", "required": True, "secret": False, "default": 7}]
-    visual = {"id": "ourapps-ae." + name, "name": name, "kind": "application" if recipe else "component", "status": "example",
+    visual = {"id": "clodhub." + name, "name": name, "kind": "application" if recipe else "component", "status": "example",
               "ports": [], "settings": [{"id": "count", "name": "Count", "type": "number", "required": True, "secret": False, "default": 7}]}
-    visual.update({"revision": version} if recipe else {"package": "ourapps-ae/" + name, "version": version})
+    visual.update({"revision": version} if recipe else {"package": "clodhub/" + name, "version": version})
     write(root / "visual.json", visual)
     (root / "source.txt").write_text("count={{count}}\nversion=" + version + "\n")
     manifest["files"].append({"path": "source.txt", "executable": False})
@@ -82,8 +82,8 @@ class ApplicationTests(unittest.TestCase):
             statements = cls.store / "statements" / ref["digest"]
             publish_review(cls.store, ref, report, cls.identities / "guardian.pem", policy=cls.policy)
             verify_package(ref, cls.store, cls.policy)
-        cls.definition = {"format": 2, "id": "sample-app", "title": "Sample", "recipe": {"name": "ourapps-ae/recipe", "version": "0.1.0"},
-                          "components": [{"id": "sample", "name": "ourapps-ae/sample", "version": "0.1.0", "configuration": {}}],
+        cls.definition = {"format": 2, "id": "sample-app", "title": "Sample", "recipe": {"name": "clodhub/recipe", "version": "0.1.0"},
+                          "components": [{"id": "sample", "name": "clodhub/sample", "version": "0.1.0", "configuration": {}}],
                           "configuration": {}, "design": {"definitions": [], "instances": [], "connections": []}, "updatePolicy": {"security": "auto", "features": "manual", "preview": "hold"}}
         cls.lock = resolve(requirements(cls.definition), cls.store / "catalogue.json", cls.definition["id"], digest(canonical(cls.definition)))
         cls.assembly = assemble(cls.definition, cls.lock, cls.store, cls.base / "baseline", cls.policy)
@@ -169,7 +169,7 @@ class ApplicationTests(unittest.TestCase):
         assembly, manifests = retained_manifests(self.app, self.policy)
         report = verify_application(self.app, self.policy, True)
         check_report(report, assembly["lock"], digest(canonical(assembly)), manifests)
-        ref = next(item for item in assembly["lock"]["packages"] if item["name"] == "ourapps-ae/sample")
+        ref = next(item for item in assembly["lock"]["packages"] if item["name"] == "clodhub/sample")
         retained = self.app / ".aepm/packages" / ref["digest"] / "class-check.py"
         original = retained.read_bytes()
         for change, code in ((lambda: retained.write_bytes(b"assert True\n"), "retained-source"),

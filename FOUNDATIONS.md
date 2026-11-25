@@ -42,7 +42,7 @@ Upstream `purl` and compatibility dependency names follow section 6a of the cata
 
 ## Package foundations
 
-All fields below are mandatory. Class references are exact `{name, version, digest}` objects. Names use `ourapps-ae/<slug>`, class and interface versions use three nonnegative integers, package versions may add `-preview.N`, and digests are lowercase SHA-256. `digest` is the hash of the RFC 8785 canonical descriptor. Each descriptor is an object inside the canonical package manifest. Every inventory entry hashes one packaged file; interface and behaviour files belong to that inventory. Class identity conflicts within a selected graph are errors.
+All fields below are mandatory. Class references are exact `{name, version, digest}` objects. Names use `clodhub/<slug>`, class and interface versions use three nonnegative integers, package versions may add `-preview.N`, and digests are lowercase SHA-256. `digest` is the hash of the RFC 8785 canonical descriptor. Each descriptor is an object inside the canonical package manifest. Every inventory entry hashes one packaged file; interface and behaviour files belong to that inventory. Class identity conflicts within a selected graph are errors.
 
 ## Manifest fields
 
@@ -55,8 +55,8 @@ These fields accompany the package manifest's other required fields. The complet
     "web": [{"name": "node", "versionRange": ">=22.0.0 <27.0.0", "probe": ["node", "--version"], "install": {"macos": ["brew", "install", "node"], "windows": ["winget", "install", "--exact", "--id", "OpenJS.NodeJS"], "linux": ["sudo", "apt-get", "install", "--yes", "nodejs"]}, "manual": null}],
     "server": [{"name": "node", "versionRange": ">=22.0.0 <27.0.0", "probe": ["node", "--version"], "install": {"macos": ["brew", "install", "node"], "windows": ["winget", "install", "--exact", "--id", "OpenJS.NodeJS"], "linux": ["sudo", "apt-get", "install", "--yes", "nodejs"]}, "manual": null}]
   },
-  "classes": [{"reference": {"name": "ourapps-ae/counter-class", "version": "1.0.0", "digest": "69d916fa86d7379b357fb545e432eeaebaa634140ee688e770cd315cc8c63af9"}, "descriptor": {"format": 2, "name": "ourapps-ae/counter-class", "version": "1.0.0", "title": "Counter", "summary": "A number that goes up by one", "category": "examples/counters", "presentation": "visual", "provides": [{"type": "counter", "version": "1.0.0", "path": "classes/counter/interface.json", "modules": {"web": ["counter.mjs"], "server": ["counter.mjs"]}}], "requires": [], "settings": {"type": "object", "properties": {}, "required": [], "additionalProperties": false}, "inventory": [{"path": "classes/counter/interface.json", "digest": "316538fd92c18f09d76df05de128d1099d00d7cfbf34401f82b1bd56989ba0d2"}, {"path": "classes/counter/check.mjs", "digest": "7b6a4b0a9ba601c7c2f058f62d46b4d349c8010bd6c3f9f5d28b762209735770"}], "verification": [{"id": "behaviour", "root": "package", "argv": ["node", "classes/counter/check.mjs"], "cwd": ".", "prepare": [], "tools": {"node": "26"}, "fixtures": ["classes/counter/check.mjs"], "locks": [], "network": false, "timeoutSeconds": 30, "expectedExit": 0, "scope": "required-local", "requirements": []}]}}],
-  "implements": [{"name": "ourapps-ae/counter-class", "version": "1.0.0", "digest": "69d916fa86d7379b357fb545e432eeaebaa634140ee688e770cd315cc8c63af9"}],
+  "classes": [{"reference": {"name": "clodhub/counter-class", "version": "1.0.0", "digest": "a46f8d1353594c79f1c06c50b91c810fc38c0ac8919dc612d3c29d3fcf96cfe5"}, "descriptor": {"format": 2, "name": "clodhub/counter-class", "version": "1.0.0", "title": "Counter", "summary": "A number that goes up by one", "category": "examples/counters", "presentation": "visual", "provides": [{"type": "counter", "version": "1.0.0", "path": "classes/counter/interface.json", "modules": {"web": ["counter.mjs"], "server": ["counter.mjs"]}}], "requires": [], "settings": {"type": "object", "properties": {}, "required": [], "additionalProperties": false}, "inventory": [{"path": "classes/counter/interface.json", "digest": "316538fd92c18f09d76df05de128d1099d00d7cfbf34401f82b1bd56989ba0d2"}, {"path": "classes/counter/check.mjs", "digest": "7b6a4b0a9ba601c7c2f058f62d46b4d349c8010bd6c3f9f5d28b762209735770"}], "verification": [{"id": "behaviour", "root": "package", "argv": ["node", "classes/counter/check.mjs"], "cwd": ".", "prepare": [], "tools": {"node": "26"}, "fixtures": ["classes/counter/check.mjs"], "locks": [], "network": false, "timeoutSeconds": 30, "expectedExit": 0, "scope": "required-local", "requirements": []}]}}],
+  "implements": [{"name": "clodhub/counter-class", "version": "1.0.0", "digest": "a46f8d1353594c79f1c06c50b91c810fc38c0ac8919dc612d3c29d3fcf96cfe5"}],
   "upstream": [],
   "compatibility": {
     "runtimes": {"node": ">=22.0.0 <27.0.0"},
@@ -82,7 +82,7 @@ A descriptor carries `title` (at most 256 characters), `summary` (at most 500), 
 ```json
 {
   "format": 2,
-  "name": "ourapps-ae/counter-class",
+  "name": "clodhub/counter-class",
   "version": "1.0.0",
   "title": "Counter",
   "summary": "A number that goes up by one",

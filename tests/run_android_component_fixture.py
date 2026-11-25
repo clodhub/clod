@@ -36,7 +36,7 @@ def inputs(source, context, out):
         if out.is_relative_to(original) or original.is_relative_to(out):
             raise ValueError("Output and inputs must be disjoint")
     manifest = validate_component(load(source / "component.json"))
-    if (manifest["identity"]["name"], manifest["identity"]["version"], manifest["kind"]) != ("ourapps-ae/video-calls", "0.1.2", "component") or manifest["dependencies"]:
+    if (manifest["identity"]["name"], manifest["identity"]["version"], manifest["kind"]) != ("clodhub/video-calls", "0.1.2", "component") or manifest["dependencies"]:
         raise ValueError("This release covers only the dependency-free video-calls 0.1.2 component")
     matches = [suite for suite in manifest["verification"] if suite["id"] == "android-media"]
     if len(matches) != 1:

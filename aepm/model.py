@@ -340,8 +340,12 @@ def advisory(value: object, path: str) -> str:
     return value
 
 
+SCOPE = "clodhub"
+PACKAGE_NAME = re.compile(SCOPE + r"/[a-z][a-z0-9-]*")
+
+
 def name(value: object, path: str) -> str:
-    if type(value) is not str or not re.fullmatch(r"ourapps-ae/[a-z][a-z0-9-]*", value):
+    if type(value) is not str or not PACKAGE_NAME.fullmatch(value):
         fail("invalid-name", path)
     return value
 

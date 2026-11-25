@@ -8,7 +8,7 @@ Run `python3 -m aepm --help` from this directory. For other working directories,
 python3 -m aepm pack SOURCE --store STORE
 python3 -m aepm inspect DIGEST --store STORE
 python3 -m aepm bom DIGEST --store STORE --out NAME-VERSION.cdx.json
-python3 -m aepm fetch NAME@VERSION... --store STORE [--from https://ourapps.app] [--with-dependencies]
+python3 -m aepm fetch NAME@VERSION... --store STORE [--from https://clodhub.com] [--with-dependencies]
 python3 -m aepm questions RECIPE@VERSION --store STORE [--answers PARTIAL]
 python3 -m aepm doctor RECIPE@VERSION --store STORE [--answers ANSWERS] [--install]
 python3 -m aepm space PATH [--need BYTES]
@@ -17,15 +17,15 @@ python3 -m aepm lock KIND [--timeout SECONDS] [--purpose TEXT] -- COMMAND ...
 python3 -m aepm runs
 python3 -m aepm clean [--apply] [--older-than DURATION]
 python3 -m aepm design RECIPE@VERSION --store STORE [--answers ANSWERS] [--substitute SLOT=NAME@VERSION]... [--update-policy security=auto,features=manual,preview=hold] --out DEFINITION
-python3 -m aepm alternatives RECIPE@VERSION SLOT --store STORE [--from https://ourapps.app]
+python3 -m aepm alternatives RECIPE@VERSION SLOT --store STORE [--from https://clodhub.com]
 python3 -m aepm resolve DEFINITION --catalogue STORE/catalogue.json --out LOCK
 python3 -m aepm sign STATEMENT --role release --key KEY --out ENVELOPE
 python3 -m aepm review DIGEST --store STORE --policy POLICY --trusted
 python3 -m aepm install DEFINITION --lock LOCK --store STORE --policy POLICY --target APP
 python3 -m aepm verify APP --policy POLICY --trusted
 python3 -m aepm export APP --out DIAGRAMS
-python3 -m aepm outdated APP [--from https://ourapps.app]
-python3 -m aepm propose-update APP (NEXT_DEFINITION | --channel security|features|preview [--from https://ourapps.app]) --store STORE --policy POLICY --trusted --out PROPOSAL
+python3 -m aepm outdated APP [--from https://clodhub.com]
+python3 -m aepm propose-update APP (NEXT_DEFINITION | --channel security|features|preview [--from https://clodhub.com]) --store STORE --policy POLICY --trusted --out PROPOSAL
 python3 -m aepm approve PROPOSAL --key KEY --policy POLICY --out APPROVAL
 python3 -m aepm apply APP PROPOSAL --approval APPROVAL --policy POLICY
 python3 -m aepm recover APP
@@ -53,8 +53,8 @@ Every signature is a DSSE envelope (`payloadType` `application/vnd.in-toto+json`
 |---|---|---|---|
 | release | `https://in-toto.io/attestation/release/v0.1` | `<name>-<version>.tar`, the archive digest; annotation `sourceTreeDigest` | `purl` and `releaseId` (the package name) |
 | guardian | SLSA Verification Summary `https://slsa.dev/verification_summary/v1` | the archive | `verifier.id`, `resourceUri` (the purl), `policy.uri`, `verificationResult` `PASSED`, the review report digest in `inputAttestations`, one `verifiedLevels` entry per reviewed scope (`AEPM_REQUIRED_LOCAL`, `AEPM_PLATFORM`, `AEPM_DEPLOYED`), the dependency count in `dependencyLevels.AEPM_RELEASED` |
-| owner | `https://ourapps.app/attestation/update-approval/v1` | `proposal.json`, the proposal digest | application, lock, configuration, design, assembly, report, snapshot and stage digests |
-| owner | `https://ourapps.app/attestation/execution-authorization/v1` | `assembly`, the assembly digest | run, context, policy, lock and suite-set digests, execution state, granted suites, validity window |
+| owner | `https://clodhub.com/attestation/update-approval/v1` | `proposal.json`, the proposal digest | application, lock, configuration, design, assembly, report, snapshot and stage digests |
+| owner | `https://clodhub.com/attestation/execution-authorization/v1` | `assembly`, the assembly digest | run, context, policy, lock and suite-set digests, execution state, granted suites, validity window |
 
 A store keeps `statements/<digest>/release.dsse.json` and `guardian.dsse.json`; `sign` takes an in-toto Statement and writes its envelope. `aepm.trust.publish_release` signs an archive; `publish_review(store, ref, report, private_key, *, policy)` validates the complete report and retained evidence before guardian signing. Verification accepts standard or URL-safe base64, requires the canonical (RFC 8785) payload and envelope, a signature from a key pinned for the role whose `keyid` names that key, and exactly the expected predicate; the guardian's dependency count, scope levels and report digest must match the archive's own review binding, and the report binds the exact dependency digests. `approve` writes one envelope (`APPROVAL`), as does `authorize-execution` (`AUTHORIZATION`).
 

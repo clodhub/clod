@@ -50,7 +50,7 @@ def counter(root, name="counter", implementation=b"def increment(value):\n    re
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(raw)
         manifest["files"].append({"path": path, "executable": False})
-    descriptor = {**CLASS_FIELDS, "name": "ourapps-ae/counter-class", "version": "1.0.0",
+    descriptor = {**CLASS_FIELDS, "name": "clodhub/counter-class", "version": "1.0.0",
                   "provides": [{"type": "counter", "version": "1.0.0", "path": "classes/counter/interface.json",
                                 "modules": {"web": ["counter.py"], "ios": ["counter.py"]}}],
                   "requires": [], "settings": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
@@ -171,7 +171,7 @@ class FoundationTests(unittest.TestCase):
             path = root / "classes/counter/check.py"
             original = path.read_bytes()
             path.write_bytes(b"assert True\n")
-            self.assertEqual(fit(self.ref(), candidate, authority, ["web"]), ["class-file-digest:ourapps-ae/counter-class"])
+            self.assertEqual(fit(self.ref(), candidate, authority, ["web"]), ["class-file-digest:clodhub/counter-class"])
             self.assertGreater(len(reads[reader]), len(expected))
             path.write_bytes(original)
 
@@ -182,7 +182,7 @@ class FoundationTests(unittest.TestCase):
         descriptor = other["classes"][0]["descriptor"]
         descriptor["inventory"][1]["digest"] = digest(b"assert True\n")
         other["classes"][0]["reference"]["digest"] = digest(canonical(descriptor))
-        self.assertEqual(fit(self.ref(), self.package(other, other_root), self.package(), ["web"]), ["class-unavailable:ourapps-ae/counter-class"])
+        self.assertEqual(fit(self.ref(), self.package(other, other_root), self.package(), ["web"]), ["class-unavailable:clodhub/counter-class"])
 
     def test_actual_candidate_failure_defeats_own_passing_tests(self):
         (self.source / "source/counter.py").write_bytes(b"def increment(value):\n    return value + 9\n")
@@ -464,8 +464,8 @@ class FoundationTests(unittest.TestCase):
         write(other_root / "component.json", other)
         pack(self.source, self.store)
         pack(other_root, self.store)
-        definition = {"format": 2, "id": "counter-app", "title": "Counter", "recipe": {"name": "ourapps-ae/other", "version": "0.1.0"},
-                      "components": [{"id": "counter", "name": "ourapps-ae/counter", "version": "0.1.0", "configuration": {}}],
+        definition = {"format": 2, "id": "counter-app", "title": "Counter", "recipe": {"name": "clodhub/other", "version": "0.1.0"},
+                      "components": [{"id": "counter", "name": "clodhub/counter", "version": "0.1.0", "configuration": {}}],
                       "configuration": {}, "design": {"definitions": [], "instances": [], "connections": []}, "updatePolicy": {"security": "auto", "features": "manual", "preview": "hold"}}
         for operation in (lambda: resolve(requirements(definition), self.store / "catalogue.json", "counter-app", digest(canonical(definition))),
                           lambda: assemble(definition, {"format": 1, "application": "counter-app", "definitionDigest": digest(canonical(definition)),
@@ -483,7 +483,7 @@ class FoundationTests(unittest.TestCase):
         examples = [json.loads(raw) for raw in re.findall(r"```json\n(.*?)\n```", document, re.S)]
         self.assertEqual(examples[0], {key: manifest[key] for key in examples[0]})
         self.assertEqual(digest(canonical(examples[1])), manifest["implements"][0]["digest"])
-        self.assertEqual(manifest["implements"][0]["digest"], "69d916fa86d7379b357fb545e432eeaebaa634140ee688e770cd315cc8c63af9")
+        self.assertEqual(manifest["implements"][0]["digest"], "a46f8d1353594c79f1c06c50b91c810fc38c0ac8919dc612d3c29d3fcf96cfe5")
         self.assertEqual(fit(manifest["implements"][0], Package(manifest, payloads.__getitem__), Package(manifest, payloads.__getitem__), ["web"]), [])
         policy = self.sign_for_review([ref])
         report = review_package(ref, self.store, policy, True)

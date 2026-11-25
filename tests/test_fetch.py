@@ -38,7 +38,7 @@ class FetchTests(unittest.TestCase):
         self.root = Path(temp.name).resolve()
         self.source = self.root / "source-store"
         fixture(self.root / "leaf", "leaf")
-        fixture(self.root / "sample", dependencies=[{"name": "ourapps-ae/leaf", "version": "0.1.0"}])
+        fixture(self.root / "sample", dependencies=[{"name": "clodhub/leaf", "version": "0.1.0"}])
         self.leaf = pack(self.root / "leaf", self.source)
         self.sample = pack(self.root / "sample", self.source)
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Catalogue)
@@ -57,10 +57,10 @@ class FetchTests(unittest.TestCase):
         base = f"/api/components/{short}/{ref['version']}"
         data = served if served is not None else (self.source / "objects" / (ref["digest"] + ".tar")).read_bytes()
         Catalogue.routes[base] = {"name": ref["name"], "version": ref["version"], "digest": "sha256:" + (listed or ref["digest"]),
-                                  "source": {"repository": "ourapps-ae/" + short, "tag": "v" + ref["version"]}}
+                                  "source": {"repository": "clodhub/" + short, "tag": "v" + ref["version"]}}
         Catalogue.routes[base + "/bundle"] = {"digest": "sha256:" + (listed or ref["digest"]), "url": f"{self.origin}/dl/{short}"}
         Catalogue.routes[f"/dl/{short}"] = data
-        return f"/gh/ourapps-ae/{short}/releases/download/v{ref['version']}/{short}-{ref['version']}"
+        return f"/gh/clodhub/{short}/releases/download/v{ref['version']}/{short}-{ref['version']}"
 
     def command(self, *args):
         output = io.StringIO()
@@ -74,7 +74,7 @@ class FetchTests(unittest.TestCase):
         report = {"format": 1, "context": "review"}
         Catalogue.routes[assets + ".release.dsse.json"] = canonical(envelope)
         Catalogue.routes[assets + ".review.json"] = canonical(report)
-        results = fetch(self.store, [("ourapps-ae/sample", "0.1.0")], origin=self.origin, assets=self.origin + "/gh")
+        results = fetch(self.store, [("clodhub/sample", "0.1.0")], origin=self.origin, assets=self.origin + "/gh")
         self.assertEqual(results, [{**self.sample, "kind": "component", "assets": ["release", "review"]}])
         self.assertEqual((self.store / "objects" / (self.sample["digest"] + ".tar")).read_bytes(),
                          (self.source / "objects" / (self.sample["digest"] + ".tar")).read_bytes())
@@ -87,9 +87,9 @@ class FetchTests(unittest.TestCase):
     def test_dependencies_and_command(self):
         code, value = self.command("fetch", "sample@0.1.0", "--store", self.store, "--from", self.origin, "--with-dependencies")
         self.assertEqual(code, 0, value)
-        self.assertEqual([item["name"] for item in value["result"]], ["ourapps-ae/sample", "ourapps-ae/leaf"])
+        self.assertEqual([item["name"] for item in value["result"]], ["clodhub/sample", "clodhub/leaf"])
         self.assertEqual(sorted(e["name"] for e in json.loads((self.store / "catalogue.json").read_text())["entries"]),
-                         ["ourapps-ae/leaf", "ourapps-ae/sample"])
+                         ["clodhub/leaf", "clodhub/sample"])
 
     def test_recipe_dependencies_follow_slots_and_job_candidates(self):
         from aepm.io import write
@@ -97,12 +97,12 @@ class FetchTests(unittest.TestCase):
         manifest = fixture(recipe_root, "game")
         manifest["kind"] = "recipe"
         manifest["artefacts"][0]["destination"] = "run.sh"
-        write(recipe_root / "recipe.json", {"format": 2, "questions": [], "name": "ourapps-ae/game", "version": "0.1.0", "components": [
+        write(recipe_root / "recipe.json", {"format": 2, "questions": [], "name": "clodhub/game", "version": "0.1.0", "components": [
             {"id": "sample", "class": manifest["classes"][0]["reference"],
-             "preferred": {"name": "ourapps-ae/sample", "version": "0.1.0"}, "configuration": {}, "includedWhen": None}],
+             "preferred": {"name": "clodhub/sample", "version": "0.1.0"}, "configuration": {}, "includedWhen": None}],
             "jobs": [{"id": "job", "slot": "sample", "candidates": [
-                {"component": "ourapps-ae/sample", "profile": "any"},
-                {"component": "ourapps-ae/leaf", "version": "0.1.0", "profile": "any"}]}]})
+                {"component": "clodhub/sample", "profile": "any"},
+                {"component": "clodhub/leaf", "version": "0.1.0", "profile": "any"}]}]})
         manifest["files"].append({"path": "recipe.json", "executable": False})
         manifest["files"].sort(key=lambda item: item["path"])
         (recipe_root / "component.json").write_bytes(canonical(manifest))
@@ -112,26 +112,26 @@ class FetchTests(unittest.TestCase):
         Catalogue.routes[f"/api/recipes/{short}/0.1.0"] = {"name": game["name"], "version": "0.1.0", "digest": "sha256:" + game["digest"]}
         Catalogue.routes[f"/api/recipes/{short}/0.1.0/bundle"] = {"digest": "sha256:" + game["digest"], "url": f"{self.origin}/dl/{short}"}
         Catalogue.routes[f"/dl/{short}"] = (self.source / "objects" / (game["digest"] + ".tar")).read_bytes()
-        results = fetch(self.store, [("ourapps-ae/game", "0.1.0")], with_dependencies=True, origin=self.origin)
-        self.assertEqual([item["name"] for item in results], ["ourapps-ae/game", "ourapps-ae/sample", "ourapps-ae/leaf"])
+        results = fetch(self.store, [("clodhub/game", "0.1.0")], with_dependencies=True, origin=self.origin)
+        self.assertEqual([item["name"] for item in results], ["clodhub/game", "clodhub/sample", "clodhub/leaf"])
 
     def test_digest_mismatch_and_unknown_are_refused(self):
         leaf_bytes = (self.source / "objects" / (self.leaf["digest"] + ".tar")).read_bytes()
         self.publish(self.sample, served=leaf_bytes)
         with self.assertRaisesRegex(AepmError, "archive-digest"):
-            fetch(self.store, [("ourapps-ae/sample", "0.1.0")], origin=self.origin)
+            fetch(self.store, [("clodhub/sample", "0.1.0")], origin=self.origin)
         self.publish(self.sample, served=leaf_bytes, listed=self.leaf["digest"])
         with self.assertRaisesRegex(AepmError, "identity-mismatch"):
-            fetch(self.store, [("ourapps-ae/sample", "0.1.0")], origin=self.origin)
+            fetch(self.store, [("clodhub/sample", "0.1.0")], origin=self.origin)
         self.assertFalse((self.store / "catalogue.json").exists())
         with self.assertRaisesRegex(AepmError, "unknown-package"):
-            fetch(self.store, [("ourapps-ae/absent", "0.1.0")], origin=self.origin)
+            fetch(self.store, [("clodhub/absent", "0.1.0")], origin=self.origin)
 
     def test_noncanonical_report_refused(self):
         assets = self.publish(self.sample)
         Catalogue.routes[assets + ".review.json"] = b'{"format": 1}'
         with self.assertRaisesRegex(AepmError, "invalid-report"):
-            fetch(self.store, [("ourapps-ae/sample", "0.1.0")], origin=self.origin, assets=self.origin + "/gh")
+            fetch(self.store, [("clodhub/sample", "0.1.0")], origin=self.origin, assets=self.origin + "/gh")
 
 
 if __name__ == "__main__":
@@ -177,10 +177,10 @@ class FetchInstallTests(unittest.TestCase):
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Catalogue)
         origin = f"http://127.0.0.1:{server.server_port}"
         statements = source / "statements" / ref["digest"]
-        assets = "/gh/ourapps-ae/game-recipe/releases/download/v0.1.0/game-0.1.0"
+        assets = "/gh/clodhub/game-recipe/releases/download/v0.1.0/game-0.1.0"
         Catalogue.routes = {
             "/api/recipes/game/0.1.0": {"name": ref["name"], "version": "0.1.0", "digest": "sha256:" + ref["digest"],
-                                        "source": {"repository": "ourapps-ae/game-recipe", "tag": "v0.1.0"}},
+                                        "source": {"repository": "clodhub/game-recipe", "tag": "v0.1.0"}},
             "/api/recipes/game/0.1.0/bundle": {"digest": "sha256:" + ref["digest"], "url": origin + "/dl/game"},
             "/dl/game": (source / "objects" / (ref["digest"] + ".tar")).read_bytes(),
             assets + ".release.dsse.json": (statements / "release.dsse.json").read_bytes(),
@@ -191,14 +191,14 @@ class FetchInstallTests(unittest.TestCase):
         self.addCleanup(server.shutdown)
         store = root / "store"
         with self.assertRaisesRegex(AepmError, "evidence-missing"):
-            fetch(store, [("ourapps-ae/game", "0.1.0")], origin=origin, assets=origin + "/gh")
+            fetch(store, [("clodhub/game", "0.1.0")], origin=origin, assets=origin + "/gh")
         evidence = pack_evidence(source, report)
         tampered = evidence.replace(b'"format":1', b'"format":9', 1)
         Catalogue.routes[assets + ".evidence.tar"] = tampered
         with self.assertRaisesRegex(AepmError, "evidence-digest"):
-            fetch(root / "store-tampered", [("ourapps-ae/game", "0.1.0")], origin=origin, assets=origin + "/gh")
+            fetch(root / "store-tampered", [("clodhub/game", "0.1.0")], origin=origin, assets=origin + "/gh")
         Catalogue.routes[assets + ".evidence.tar"] = evidence
-        results = fetch(store, [("ourapps-ae/game", "0.1.0")], origin=origin, assets=origin + "/gh")
+        results = fetch(store, [("clodhub/game", "0.1.0")], origin=origin, assets=origin + "/gh")
         self.assertEqual(results[0]["assets"], ["release", "guardian", "evidence", "review"])
         for path in paths:
             self.assertEqual((store / path).read_bytes(), (source / path).read_bytes())

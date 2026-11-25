@@ -1,7 +1,7 @@
 {
   "format": 3,
   "kind": "component",
-  "identity": {"name": "ourapps-ae/counter", "version": "1.0.0", "sourceRevision": "example-1.0.0", "sourceTreeDigest": "0000000000000000000000000000000000000000000000000000000000000000", "licence": "Apache-2.0"},
+  "identity": {"name": "clodhub/counter", "version": "1.0.0", "sourceRevision": "example-1.0.0", "sourceTreeDigest": "0000000000000000000000000000000000000000000000000000000000000000", "licence": "Apache-2.0"},
   "facilities": [{"id": "counter", "description": "Increment an integer"}],
   "documents": {"contract": "CONTRACT.md", "interfaces": ["classes/counter/interface.json"], "examples": ["example.json"], "licenceNotice": "NOTICE"},
   "collect": [],
@@ -36,10 +36,10 @@
     "server": [{"name": "node", "versionRange": ">=22.0.0 <27.0.0", "probe": ["node", "--version"], "install": {"macos": ["brew", "install", "node"], "windows": ["winget", "install", "--exact", "--id", "OpenJS.NodeJS"], "linux": ["sudo", "apt-get", "install", "--yes", "nodejs"]}, "manual": null}]
   },
   "classes": [{
-    "reference": {"name": "ourapps-ae/counter-class", "version": "1.0.0", "digest": "69d916fa86d7379b357fb545e432eeaebaa634140ee688e770cd315cc8c63af9"},
+    "reference": {"name": "clodhub/counter-class", "version": "1.0.0", "digest": "a46f8d1353594c79f1c06c50b91c810fc38c0ac8919dc612d3c29d3fcf96cfe5"},
     "descriptor": {
       "format": 2,
-      "name": "ourapps-ae/counter-class",
+      "name": "clodhub/counter-class",
       "version": "1.0.0",
       "title": "Counter",
       "summary": "A number that goes up by one",
@@ -55,7 +55,7 @@
       "verification": [{"id": "behaviour", "root": "package", "argv": ["node", "classes/counter/check.mjs"], "cwd": ".", "prepare": [], "tools": {"node": "26"}, "fixtures": ["classes/counter/check.mjs"], "locks": [], "network": false, "timeoutSeconds": 30, "expectedExit": 0, "scope": "required-local", "requirements": []}]
     }
   }],
-  "implements": [{"name": "ourapps-ae/counter-class", "version": "1.0.0", "digest": "69d916fa86d7379b357fb545e432eeaebaa634140ee688e770cd315cc8c63af9"}],
+  "implements": [{"name": "clodhub/counter-class", "version": "1.0.0", "digest": "a46f8d1353594c79f1c06c50b91c810fc38c0ac8919dc612d3c29d3fcf96cfe5"}],
   "upstream": [],
   "compatibility": {"runtimes": {"node": ">=22.0.0 <27.0.0"}, "frameworks": {}, "dependencies": [], "styles": {"scope": "none", "namespaces": [], "conflicts": []}},
   "maintenance": {"owners": ["Example Maintainer"], "contact": "mailto:maintainer@example.org", "repository": "https://example.org/counter", "updates": {"source": "https://example.org/counter/releases", "strategy": "manual"}}

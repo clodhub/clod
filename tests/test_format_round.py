@@ -333,7 +333,7 @@ class PurlTests(unittest.TestCase):
 class PolicyTests(unittest.TestCase):
     def test_update_policy_and_earlier_definitions(self):
         from aepm.application import DEFAULT_POLICY, parse_update_policy, validate_definition
-        definition = {"format": 2, "id": "app", "title": "App", "recipe": {"name": "ourapps-ae/recipe", "version": "1.0.0-preview.1"},
+        definition = {"format": 2, "id": "app", "title": "App", "recipe": {"name": "clodhub/recipe", "version": "1.0.0-preview.1"},
                       "components": [], "configuration": {}, "design": {"definitions": [], "instances": [], "connections": []},
                       "updatePolicy": dict(DEFAULT_POLICY)}
         validate_definition(definition)

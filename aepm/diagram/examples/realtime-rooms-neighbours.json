@@ -7,7 +7,7 @@
   "focus": "rooms",
   "definitions": [
     {
-      "id": "rooms", "name": "Realtime rooms", "kind": "component", "status": "proposed", "package": "ourapps-ae/realtime-rooms", "version": "0.1.0",
+      "id": "rooms", "name": "Realtime rooms", "kind": "component", "status": "proposed", "package": "clodhub/realtime-rooms", "version": "0.1.0",
       "ports": [
         {"id": "rules", "name": "Rules contract", "direction": "input", "kind": "interface", "type": "ae/game-rules", "version": "1.0.0", "required": true, "cardinality": "one"},
         {"id": "metrics", "name": "Optional room observer", "direction": "input", "kind": "interface", "type": "ae/room-observer", "version": "1.0.0", "required": false, "cardinality": "many"},
@@ -28,7 +28,7 @@
       ]
     },
     {
-      "id": "client", "name": "Example room client", "kind": "component", "status": "example", "package": "ourapps-ae/example-room-client", "version": "0.1.0",
+      "id": "client", "name": "Example room client", "kind": "component", "status": "example", "package": "clodhub/example-room-client", "version": "0.1.0",
       "ports": [
         {"id": "room", "name": "Join and observe room", "direction": "input", "kind": "interface", "type": "ae/room-session", "version": "1.0.0", "required": true, "cardinality": "one"}
       ],

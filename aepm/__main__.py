@@ -8,8 +8,9 @@ import sys
 from .application import assemble, read_assembly, requirements, validate_definition
 from .bundle import pack, read_package, resolve
 from .export import export_design
+from .fetch import CATALOGUE
 from .io import fail, linked, load, write
-from .model import AepmError, canonical, digest
+from .model import SCOPE, AepmError, canonical, digest
 from .trust import sign
 from .verification import review_package, verify_application
 
@@ -41,7 +42,7 @@ def parser():
             child.add_argument("definition", nargs="?")
             child.add_argument("--channel", choices=("security", "features", "preview"))
             child.add_argument("--update-policy")
-            child.add_argument("--from", dest="origin", default="https://ourapps.app")
+            child.add_argument("--from", dest="origin", default=CATALOGUE)
         if command in ("verify", "review", "propose-update"):
             child.add_argument("--trusted", action="store_true")
             child.add_argument("--allow-network", action="store_true")
@@ -66,16 +67,16 @@ def parser():
     design.add_argument("--update-policy")
     stale = commands.add_parser("outdated")
     stale.add_argument("app", type=Path)
-    stale.add_argument("--from", dest="origin", default="https://ourapps.app")
+    stale.add_argument("--from", dest="origin", default=CATALOGUE)
     other = commands.add_parser("alternatives")
     other.add_argument("recipe")
     other.add_argument("slot")
     other.add_argument("--store", type=Path, required=True)
-    other.add_argument("--from", dest="origin", default="https://ourapps.app")
+    other.add_argument("--from", dest="origin", default=CATALOGUE)
     get = commands.add_parser("fetch")
     get.add_argument("packages", nargs="+")
     get.add_argument("--store", type=Path, required=True)
-    get.add_argument("--from", dest="origin", default="https://ourapps.app")
+    get.add_argument("--from", dest="origin", default=CATALOGUE)
     get.add_argument("--with-dependencies", action="store_true")
     check = commands.add_parser("doctor")
     check.add_argument("recipe")
@@ -120,7 +121,7 @@ def identity(value):
     package, separator, number = value.rpartition("@")
     if not separator:
         fail("arguments", "package")
-    package = package if "/" in package else "ourapps-ae/" + package
+    package = package if "/" in package else f"{SCOPE}/{package}"
     return name(package, "package"), package_version(number, "package")
 
 

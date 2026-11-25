@@ -3,12 +3,11 @@
 import json
 import os
 from pathlib import Path
-import re
 import stat
 import tempfile
 from typing import Any, NoReturn
 
-from .model import AepmError, canonical, digest
+from .model import PACKAGE_NAME, AepmError, canonical, digest
 from . import state as _state  # noqa: F401  (owner identity read before any test replaces native libraries)
 
 
@@ -223,7 +222,7 @@ def exact(value, path="version"):
 
 
 def package_name(value):
-    if not isinstance(value, str) or not re.fullmatch(r"ourapps-ae/[a-z][a-z0-9-]*", value):
+    if not isinstance(value, str) or not PACKAGE_NAME.fullmatch(value):
         fail("package-name", "name")
     return value
 

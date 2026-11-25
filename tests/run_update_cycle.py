@@ -52,8 +52,8 @@ for ref in refs:
     code, value = aepm("review", ref["digest"], "--store", store, "--policy", policy, "--trusted")
     assert code == 0 and value["result"]["summary"]["required-local"] == "passed", value
     publish_review(store, ref, value["result"], work / "identities/guardian.pem", policy=policy)
-definition = {"format": 2, "id": "sample-app", "title": "Sample", "recipe": {"name": "ourapps-ae/recipe", "version": "0.1.0"},
-              "components": [{"id": "sample", "name": "ourapps-ae/sample", "version": "0.1.0", "configuration": {}}],
+definition = {"format": 2, "id": "sample-app", "title": "Sample", "recipe": {"name": "clodhub/recipe", "version": "0.1.0"},
+              "components": [{"id": "sample", "name": "clodhub/sample", "version": "0.1.0", "configuration": {}}],
               "configuration": {}, "design": {"definitions": [], "instances": [], "connections": []}, "updatePolicy": {"security": "auto", "features": "manual", "preview": "hold"}}
 write(work / "definition.json", definition)
 assert aepm("resolve", work / "definition.json", "--catalogue", store / "catalogue.json", "--out", work / "lock.json")[0] == 0

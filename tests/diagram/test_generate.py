@@ -45,7 +45,7 @@ def design():
     return {"schemaVersion": 1, "id": "example", "title": "Example", "status": "proposed", "view": "application",
             "definitions": [
                 {"id": "producer", "name": "Shared label", "kind": "component", "status": "proposed",
-                 "package": "ourapps-ae/example", "version": "0.1.0", "ports": [port("out", "output")], "settings": []},
+                 "package": "clodhub/example", "version": "0.1.0", "ports": [port("out", "output")], "settings": []},
                 {"id": "consumer", "name": "Shared label", "kind": "application", "status": "example",
                  "revision": "0.1.0", "ports": [port("in", "input")], "settings": []}],
             "instances": [
@@ -82,7 +82,7 @@ class ValidationTests(unittest.TestCase):
                 self.assertIn(value["status"], ("proposed", "example"))
                 for definition in value["definitions"]:
                     if definition["kind"] == "component":
-                        self.assertTrue(definition["package"].startswith("ourapps-ae/"))
+                        self.assertTrue(definition["package"].startswith("clodhub/"))
 
     def test_matching_example_packages_have_identical_contracts(self):
         contracts = {}
@@ -163,7 +163,7 @@ class ValidationTests(unittest.TestCase):
             value["definitions"][0].update(updates)
             self.assert_invalid(value)
         value = design()
-        value["definitions"][1]["package"] = "ourapps-ae/rules"
+        value["definitions"][1]["package"] = "clodhub/rules"
         self.assert_invalid(value)
 
     def test_port_fields_and_identifiers(self):
@@ -697,7 +697,7 @@ class RealGraphvizTests(unittest.TestCase):
                 g.png_dimensions(raster)
                 root = ET.fromstring(vector)
                 texts = " ".join(root.itertext())
-                self.assertIn("ourapps-ae/realtime-rooms", texts)
+                self.assertIn("clodhub/realtime-rooms", texts)
                 self.assertIn("Proposed definition", texts)
                 self.assertIn("Proposed version 0.1.0", texts)
                 self.assertIn("[secret reference]", texts)

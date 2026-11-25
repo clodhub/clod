@@ -51,12 +51,12 @@ def fixture(root, name="sample", version="0.1.0", dependencies=None, python=PYTH
                "visual.json": b"{}", "visual.svg": b"<svg/>", "visual.png": b"PNG",
                "description.txt": b"Connected example\n", "fixture.txt": b"fixture\n", "example.png": png(4, 3),
                 "test.py": b"assert 2 + 2 == 4\n", "run.sh": b"#!/bin/sh\nexit 0\n",
-                "class-check.py": b"import json, os\nfrom pathlib import Path\nm = json.loads(Path(os.environ['AEPM_CANDIDATE_MANIFEST']).read_text())\nassert m['identity']['name'].startswith('ourapps-ae/')\nassert all(Path(p).is_file() for p in json.loads(os.environ['AEPM_MODULE_MAP']).values())\n"}
+                "class-check.py": b"import json, os\nfrom pathlib import Path\nm = json.loads(Path(os.environ['AEPM_CANDIDATE_MANIFEST']).read_text())\nassert m['identity']['name'].startswith('clodhub/')\nassert all(Path(p).is_file() for p in json.loads(os.environ['AEPM_MODULE_MAP']).values())\n"}
     for path, data in content.items():
         (root / path).write_bytes(data)
         (root / path).chmod(0o755 if path == "run.sh" else 0o644)
     c = {"format": 3, "kind": "component",
-         "identity": {"name": "ourapps-ae/" + name, "version": version,
+         "identity": {"name": "clodhub/" + name, "version": version,
                       "sourceRevision": "test-revision", "sourceTreeDigest": "0" * 64,
                       "licence": "Apache-2.0"},
          "facilities": [{"id": "sample", "description": "Sample fixture"}],
@@ -81,7 +81,7 @@ def fixture(root, name="sample", version="0.1.0", dependencies=None, python=PYTH
          "upgrade": {"migration": "files-only"}, "release": {"channel": "features", "fixes": []},
          "images": [{"path": "example.png", "caption": "The fixture's example", "platform": "web", "width": 4, "height": 3}],
          "vulnerabilityWaivers": []}
-    descriptor = {**CLASS_FIELDS, "name": "ourapps-ae/fixture-" + name, "version": "1.0.0", "provides": [], "requires": [],
+    descriptor = {**CLASS_FIELDS, "name": "clodhub/fixture-" + name, "version": "1.0.0", "provides": [], "requires": [],
                   "settings": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
                   "inventory": [{"path": "class-check.py", "digest": digest(content["class-check.py"])}],
                   "verification": [{**copy.deepcopy(c["verification"][0]), "id": "behaviour", "argv": [python, "class-check.py"],
@@ -378,7 +378,7 @@ class CoreTests(unittest.TestCase):
                     c = copy.deepcopy(self.component)
                     c["artefacts"][0] = {**plain, key: value}
                     self.assertEqual(validate_component(c)["artefacts"][0][key], value)
-            for value, code in (("ourapps-ae/video", "invalid-slot"), ("application", "invalid-slot"), ("1x", "invalid-slot"),
+            for value, code in (("clodhub/video", "invalid-slot"), ("application", "invalid-slot"), ("1x", "invalid-slot"),
                                 ("", "invalid-slot"), (None, "artefact-condition"), (1, "artefact-condition"),
                                 ({}, "artefact-condition"), ([], "artefact-condition"), (["video"], "artefact-condition"),
                                 (["video", "video"], "artefact-condition"), (["video", 1], "invalid-slot")):
@@ -479,9 +479,9 @@ class CoreTests(unittest.TestCase):
 
     def test_review_bindings_reject_dependency_cycles(self):
         other = self.root / "other"
-        fixture(other, "other", dependencies=[{"name": "ourapps-ae/sample", "version": "0.1.0"}])
+        fixture(other, "other", dependencies=[{"name": "clodhub/sample", "version": "0.1.0"}])
         pack(other, self.store)
-        self.component["dependencies"] = [{"name": "ourapps-ae/other", "version": "0.1.0"}]
+        self.component["dependencies"] = [{"name": "clodhub/other", "version": "0.1.0"}]
         self.update()
         ref = pack(self.source, self.store)
         with self.assertRaisesRegex(AepmError, "dependency-cycle"):
@@ -523,7 +523,7 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(envelope["signatures"][0]["sig"], self.node_sign(canonical(statement)))
         self.assertEqual(statement["_type"], "https://in-toto.io/Statement/v1")
         self.assertEqual(statement["predicateType"], RELEASE)
-        self.assertEqual(statement["predicate"], {"purl": "pkg:github/ourapps-ae/sample@v0.1.0", "releaseId": "ourapps-ae/sample"})
+        self.assertEqual(statement["predicate"], {"purl": "pkg:github/clodhub/sample@v0.1.0", "releaseId": "clodhub/sample"})
         self.assertEqual(statement["subject"][0]["digest"], {"sha256": ref["digest"]})
         self.assertEqual(verify(canonical(envelope), "release", self.policy, RELEASE), (statement, digest(public)))
         urlsafe = {**envelope, "payload": base64.urlsafe_b64encode(canonical(statement)).decode().rstrip("=")}
@@ -573,7 +573,7 @@ class CoreTests(unittest.TestCase):
         self.update()
         root_ref = pack(self.source, self.store)
         lock = resolve([{"name": root_ref["name"], "version": "0.1.0"}], self.store / "catalogue.json", "app", "a" * 64)
-        self.assertEqual([p["name"] for p in lock["packages"]], ["ourapps-ae/leaf", "ourapps-ae/middle", "ourapps-ae/sample"])
+        self.assertEqual([p["name"] for p in lock["packages"]], ["clodhub/leaf", "clodhub/middle", "clodhub/sample"])
         self.assertEqual(lock["packages"][1]["dependencies"], [{"name": leaf_ref["name"], "digest": leaf_ref["digest"]}])
         with self.assertRaisesRegex(AepmError, "dependency-conflict"):
             resolve([{"name": root_ref["name"], "version": "0.1.0"}, {"name": leaf_ref["name"], "version": "0.1.1"}], self.store / "catalogue.json", "app", "a" * 64)
@@ -582,7 +582,7 @@ class CoreTests(unittest.TestCase):
         ref = pack(self.source, self.store)
         lock = resolve([{"name": ref["name"], "version": ref["version"]}], self.store / "catalogue.json", "app", "a" * 64)
         for alter in (lambda c: c.update(extra=True), lambda c: c["packages"].append(c["packages"][0]),
-                      lambda c: c["packages"][0]["dependencies"].append({"name": "ourapps-ae/absent", "digest": "b" * 64})):
+                      lambda c: c["packages"][0]["dependencies"].append({"name": "clodhub/absent", "digest": "b" * 64})):
             c = copy.deepcopy(lock)
             alter(c)
             with self.assertRaises(AepmError):
@@ -668,8 +668,8 @@ class CoreTests(unittest.TestCase):
         statement = self.release(ref)
         for change in (lambda s: s["subject"][0].update(name="other-0.1.0.tar"),
                        lambda s: s["subject"][0]["digest"].update(sha256="a" * 64),
-                       lambda s: s["predicate"].update(purl="pkg:github/ourapps-ae/sample@v0.1.1"),
-                       lambda s: s["predicate"].update(releaseId="ourapps-ae/other"),
+                       lambda s: s["predicate"].update(purl="pkg:github/clodhub/sample@v0.1.1"),
+                       lambda s: s["predicate"].update(releaseId="clodhub/other"),
                        lambda s: s["subject"][0]["annotations"].update(sourceTreeDigest="a" * 64)):
             altered = json.loads(canonical(statement))
             change(altered)

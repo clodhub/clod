@@ -54,8 +54,8 @@ def attach_class(root, manifest, entry):
 
 
 def slot(identifier, name, provides=(), properties=None, required=(), includedWhen=None):
-    check = b"import json, os\nfrom pathlib import Path\nm = json.loads(Path(os.environ['AEPM_CANDIDATE_MANIFEST']).read_text())\nassert m['identity']['name'].startswith('ourapps-ae/')\nassert all(Path(p).is_file() for p in json.loads(os.environ['AEPM_MODULE_MAP']).values())\n"
-    descriptor = {**CLASS_FIELDS, "name": "ourapps-ae/" + identifier + "-class", "version": "1.0.0",
+    check = b"import json, os\nfrom pathlib import Path\nm = json.loads(Path(os.environ['AEPM_CANDIDATE_MANIFEST']).read_text())\nassert m['identity']['name'].startswith('clodhub/')\nassert all(Path(p).is_file() for p in json.loads(os.environ['AEPM_MODULE_MAP']).values())\n"
+    descriptor = {**CLASS_FIELDS, "name": "clodhub/" + identifier + "-class", "version": "1.0.0",
                   "provides": [{"type": "ae/" + port, "version": "1.0.0", "path": f"classes/{identifier}/{port}.json", "modules": {"web": ["run.sh"]}} for port in provides],
                   "requires": [], "settings": {"type": "object", "properties": properties or {}, "required": list(required), "additionalProperties": False},
                   "inventory": [{"path": "class-check.py", "digest": digest(check)},
@@ -71,15 +71,15 @@ def slot(identifier, name, provides=(), properties=None, required=(), includedWh
 
 
 RECIPE = {
-    "format": 2, "name": "ourapps-ae/game", "version": "0.1.0", "title": "Game",
+    "format": 2, "name": "clodhub/game", "version": "0.1.0", "title": "Game",
     "components": [
-        slot("deck", "ourapps-ae/deck", ["deck"], {"targets": LABEL}, ["targets"]),
-        slot("video", "ourapps-ae/video", properties={"key": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$"}},
+        slot("deck", "clodhub/deck", ["deck"], {"targets": LABEL}, ["targets"]),
+        slot("video", "clodhub/video", properties={"key": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$"}},
              includedWhen="video"),
-        slot("host", "ourapps-ae/host", properties={"provider": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"}}),
+        slot("host", "clodhub/host", properties={"provider": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"}}),
     ],
     "jobs": [{"id": "server", "slot": "host", "overrideQuestion": "server", "candidates": [
-        {"component": "ourapps-ae/host", "profile": "free"}, {"component": "ourapps-ae/host", "profile": "paid"}]}],
+        {"component": "clodhub/host", "profile": "free"}, {"component": "clodhub/host", "profile": "paid"}]}],
     "scale": {"question": "scale", "bands": [
         {"id": "small", "label": "small", "load": {"concurrentPeople": 10}},
         {"id": "large", "label": "large", "load": {"concurrentPeople": 1000}}]},
@@ -151,8 +151,8 @@ class RecipeDesignTests(unittest.TestCase):
         cls.temp.cleanup()
 
     def world(self, **substitutes):
-        return World.from_store("ourapps-ae/game", "0.1.0", self.store,
-                                {key: ("ourapps-ae/" + value, "0.1.0") for key, value in substitutes.items()})
+        return World.from_store("clodhub/game", "0.1.0", self.store,
+                                {key: ("clodhub/" + value, "0.1.0") for key, value in substitutes.items()})
 
     def command(self, *args):
         output = io.StringIO()
@@ -176,8 +176,8 @@ class RecipeDesignTests(unittest.TestCase):
         result = evaluate(self.world(), {})
         self.assertTrue(result["ok"], result)
         design = validate_definition(result["design"])
-        self.assertEqual([(item["id"], item["name"]) for item in design["components"]], [("deck", "ourapps-ae/deck"), ("host", "ourapps-ae/host")])
-        self.assertEqual(design["selections"]["server"], {"component": "ourapps-ae/host", "version": "0.1.0", "profile": "free",
+        self.assertEqual([(item["id"], item["name"]) for item in design["components"]], [("deck", "clodhub/deck"), ("host", "clodhub/host")])
+        self.assertEqual(design["selections"]["server"], {"component": "clodhub/host", "version": "0.1.0", "profile": "free",
                                                          "reason": "scale small; 2 of 2 candidates fit; lowest cost free"})
         self.assertEqual(next(c for c in design["components"] if c["id"] == "host")["configuration"], {"provider": "free"})
         large = evaluate(self.world(), {"scale": "large", "targets": ["ios", "web"]})
@@ -208,7 +208,7 @@ class RecipeDesignTests(unittest.TestCase):
         self.assertEqual(slot_fit(alternative, "deck", alternative.filling["deck"]), [])
         for name, reasons in (("deck3", []),
                               ("deck4", ["requires:ae/random-source@1.0.0", "setting-type:targets", "unset-setting:size"]),
-                              ("host", ["class-unavailable:ourapps-ae/deck-class"])):
+                              ("host", ["class-unavailable:clodhub/deck-class"])):
             other = self.world(deck=name)
             with self.subTest(name=name):
                 self.assertEqual(slot_fit(other, "deck", other.filling["deck"]), reasons)
@@ -221,7 +221,7 @@ class RecipeDesignTests(unittest.TestCase):
         class Fake:
             def __init__(self, destinations):
                 self.manifest = {**manifest, "artefacts": [{"destination": "components/deck/" + item} for item in destinations]}
-                self.name, self.version = "ourapps-ae/deck", "0.1.0"
+                self.name, self.version = "clodhub/deck", "0.1.0"
 
             def file(self, path):
                 return preferred.file(path)
@@ -233,9 +233,9 @@ class RecipeDesignTests(unittest.TestCase):
     def test_substitution(self):
         result = evaluate(self.world(deck="deck2"), {})
         self.assertTrue(result["ok"], result)
-        self.assertEqual(result["design"]["components"][0], {"id": "deck", "name": "ourapps-ae/deck2", "version": "0.1.0",
+        self.assertEqual(result["design"]["components"][0], {"id": "deck", "name": "clodhub/deck2", "version": "0.1.0",
                                                              "configuration": {"targets": "web"}})
-        self.assertEqual(result["design"]["selections"]["deck"], {"component": "ourapps-ae/deck2", "version": "0.1.0", "reason": "substituted"})
+        self.assertEqual(result["design"]["selections"]["deck"], {"component": "clodhub/deck2", "version": "0.1.0", "reason": "substituted"})
         self.assertTrue(evaluate(self.world(deck="deck3"), {})["ok"])
         self.assertEqual(evaluate(self.world(nowhere="deck2"), {})["errors"], [{"code": "unknown-slot", "path": "nowhere"}])
 
@@ -245,12 +245,12 @@ class RecipeDesignTests(unittest.TestCase):
             store = Path(temporary).resolve() / "store"
             entries = load(self.store / "catalogue.json")["entries"]
             for entry in entries:
-                if entry["name"] in ("ourapps-ae/game", "ourapps-ae/deck2", "ourapps-ae/host", "ourapps-ae/video"):
+                if entry["name"] in ("clodhub/game", "clodhub/deck2", "clodhub/host", "clodhub/video"):
                     add_archive(store, entry, (self.store / "objects" / (entry["digest"] + ".tar")).read_bytes())
-            world = World.from_store("ourapps-ae/game", "0.1.0", store, {"deck": ("ourapps-ae/deck2", "0.1.0")})
+            world = World.from_store("clodhub/game", "0.1.0", store, {"deck": ("clodhub/deck2", "0.1.0")})
             result = evaluate(world, {})
             self.assertTrue(result["ok"], result)
-            self.assertEqual(result["design"]["components"][0]["name"], "ourapps-ae/deck2")
+            self.assertEqual(result["design"]["components"][0]["name"], "clodhub/deck2")
 
     def test_design_rejects_selected_graph_conflicts(self):
         world = self.world()
@@ -269,7 +269,7 @@ class RecipeDesignTests(unittest.TestCase):
         self.assertTrue(result["ok"], result)
         checked.assert_called_once()
         manifests, targets = checked.call_args.args
-        self.assertEqual({item["identity"]["name"] for item in manifests}, {"ourapps-ae/game", "ourapps-ae/deck", "ourapps-ae/host"})
+        self.assertEqual({item["identity"]["name"] for item in manifests}, {"clodhub/game", "clodhub/deck", "clodhub/host"})
         self.assertEqual(targets, ["web"])
 
     def test_evaluation_rechecks_class_bytes_on_every_call(self):
@@ -280,7 +280,7 @@ class RecipeDesignTests(unittest.TestCase):
         world.authority.file = lambda name: b"tampered" if name == path else original(name)
         result = evaluate(world, {})
         self.assertFalse(result["ok"])
-        self.assertIn({"code": "unfit", "path": "deck:class-file-digest:ourapps-ae/deck-class"}, result["errors"])
+        self.assertIn({"code": "unfit", "path": "deck:class-file-digest:clodhub/deck-class"}, result["errors"])
         world.authority.file = original
         self.assertTrue(evaluate(world, {})["ok"])
 
@@ -292,7 +292,7 @@ class RecipeDesignTests(unittest.TestCase):
         origin = f"http://127.0.0.1:{server.server_port}"
         catalogue = json.loads((self.store / "catalogue.json").read_text())["entries"]
         Catalogue.routes = {"/api/components?provides=ae%2Fdeck&limit=100": {"components": [
-            {"name": "ourapps-ae/" + name, "version": "0.1.0"} for name in ("deck", "deck2", "deck3")]}}
+            {"name": "clodhub/" + name, "version": "0.1.0"} for name in ("deck", "deck2", "deck3")]}}
         for entry in catalogue:
             short = entry["name"].split("/")[1]
             base = f"/api/components/{short}/0.1.0"
@@ -305,9 +305,9 @@ class RecipeDesignTests(unittest.TestCase):
         code, value = self.command("alternatives", "game@0.1.0", "deck", "--store", self.store, "--from", origin)
         self.assertEqual(code, 0, value)
         self.assertEqual(value["result"], [
-            {"name": "ourapps-ae/deck", "version": "0.1.0", "fits": True, "reasons": []},
-            {"name": "ourapps-ae/deck2", "version": "0.1.0", "fits": True, "reasons": []},
-            {"name": "ourapps-ae/deck3", "version": "0.1.0", "fits": True, "reasons": []}])
+            {"name": "clodhub/deck", "version": "0.1.0", "fits": True, "reasons": []},
+            {"name": "clodhub/deck2", "version": "0.1.0", "fits": True, "reasons": []},
+            {"name": "clodhub/deck3", "version": "0.1.0", "fits": True, "reasons": []}])
         code, value = self.command("alternatives", "game@0.1.0", "nowhere", "--store", self.store, "--from", origin)
         self.assertEqual((code, value["error"]["code"]), (1, "unknown-slot"))
 
@@ -327,10 +327,10 @@ class RecipeDesignTests(unittest.TestCase):
         code, value = self.command("design", "game@0.1.0", "--store", self.store, "--answers", answers, "--out", out)
         self.assertEqual(code, 0, value)
         self.assertEqual(validate_definition(load(out))["answers"], {"targets": ["web", "ios"], "video": False, "scale": "small", "server": "cloudflare"})
-        code, value = self.command("design", "ourapps-ae/game@0.1.0", "--store", self.store, "--substitute", "deck=deck2@0.1.0",
+        code, value = self.command("design", "clodhub/game@0.1.0", "--store", self.store, "--substitute", "deck=deck2@0.1.0",
                                    "--out", self.root / "substituted.json")
         self.assertEqual(code, 0, value)
-        self.assertEqual(load(self.root / "substituted.json")["components"][0]["name"], "ourapps-ae/deck2")
+        self.assertEqual(load(self.root / "substituted.json")["components"][0]["name"], "clodhub/deck2")
         self.assertEqual(load(self.root / "substituted.json")["updatePolicy"], {"security": "auto", "features": "manual", "preview": "hold"})
         code, value = self.command("design", "game@0.1.0", "--store", self.store, "--update-policy", "security=manual,preview=manual",
                                    "--out", self.root / "policy.json")

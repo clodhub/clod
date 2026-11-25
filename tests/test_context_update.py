@@ -61,8 +61,8 @@ class ContextUpdateTests(unittest.TestCase):
                 self.assertEqual(report["summary"]["required-local"], "passed", report)
                 publish_review(store, ref, report, root / "keys/guardian.pem", policy=policy_path)
                 verify_package(ref, store, policy_path)
-            definition = {"format": 2, "id": "context-app", "title": "Context App", "recipe": {"name": "ourapps-ae/recipe", "version": "0.1.0"},
-                          "components": [{"id": "sample", "name": "ourapps-ae/sample", "version": "0.1.0", "configuration": {}}],
+            definition = {"format": 2, "id": "context-app", "title": "Context App", "recipe": {"name": "clodhub/recipe", "version": "0.1.0"},
+                          "components": [{"id": "sample", "name": "clodhub/sample", "version": "0.1.0", "configuration": {}}],
                           "configuration": {}, "design": {"definitions": [], "instances": [], "connections": []}, "updatePolicy": {"security": "auto", "features": "manual", "preview": "hold"}}
             lock = resolve(requirements(definition), store / "catalogue.json", definition["id"], digest(canonical(definition)))
             app = root / "application"

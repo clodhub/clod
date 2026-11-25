@@ -59,7 +59,7 @@ class AndroidComponentGuardTests(unittest.TestCase):
         self.assertEqual(marker.read_bytes(), b"unchanged")
 
     def test_packed_metadata_allows_only_derived_tree_digest_change(self):
-        initial = {"identity": {"name": "ourapps-ae/video-calls", "version": "0.1.2",
+        initial = {"identity": {"name": "clodhub/video-calls", "version": "0.1.2",
                                 "sourceTreeDigest": "initial"},
                    "verification": [{"id": "android-media", "argv": ["approved"]}]}
         packed = deepcopy(initial)

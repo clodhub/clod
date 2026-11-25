@@ -18,8 +18,8 @@ from aepm.model import AepmError
 from tests.core.test_core import fixture
 
 # The archive digest of tests.core.test_core.fixture(); identical on macOS, Linux and Windows.
-FIXTURE_DIGEST = "d2ce3d4978386522e8b8a99a060f923a2fa131b38dc92bc6370b370556ed1952"
-DEFINITION = {"format": 2, "id": "sample-app", "title": "Sample", "recipe": {"name": "ourapps-ae/recipe", "version": "0.1.0"},
+FIXTURE_DIGEST = "c6999fa07d6d8b9d8d5811af948216779fee0f1d7b526cae9b1d4a6fd758c813"
+DEFINITION = {"format": 2, "id": "sample-app", "title": "Sample", "recipe": {"name": "clodhub/recipe", "version": "0.1.0"},
               "components": [], "configuration": {}, "design": {"definitions": [], "instances": [], "connections": []}, "updatePolicy": {"security": "auto", "features": "manual", "preview": "hold"}}
 
 
@@ -38,7 +38,7 @@ class HostTests(unittest.TestCase):
     def test_archive_bytes_do_not_depend_on_host_or_source_location(self):
         fixture(self.root / "source", python="python3")
         self.assertEqual(pack(self.root / "source", self.root / "store")["digest"], FIXTURE_DIGEST)
-        manifest, _ = read_package({"name": "ourapps-ae/sample", "version": "0.1.0", "digest": FIXTURE_DIGEST}, self.root / "store")
+        manifest, _ = read_package({"name": "clodhub/sample", "version": "0.1.0", "digest": FIXTURE_DIGEST}, self.root / "store")
         self.assertEqual([item["path"] for item in manifest["files"] if item["executable"]], ["run.sh"])
 
     @unittest.skipUnless(os.name == "nt", "Windows has no execute bits; POSIX packing compares them with the manifest")

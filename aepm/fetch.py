@@ -13,9 +13,9 @@ from .evidence import evidence_paths, unpack_evidence
 from .io import write
 from .model import PackageRef, canonical, digest, fail, guarded, loads, name, package_version, sha256
 
-CATALOGUE = "https://ourapps.app"
+CATALOGUE = "https://clodhub.com"
 ASSETS = "https://github.com"
-USER_AGENT = "aepm-fetch/1 (+https://ourapps.app)"
+USER_AGENT = f"aepm-fetch/1 (+{CATALOGUE})"
 LIMIT = 512 * 1024 * 1024
 ATTESTATIONS = ("release", "guardian")
 

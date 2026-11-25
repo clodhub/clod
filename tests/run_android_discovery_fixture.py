@@ -14,7 +14,7 @@ import threading
 from unittest.mock import patch
 
 
-EXPECTED = {"name": "ourapps-ae/video-calls", "version": "0.1.2",
+EXPECTED = {"name": "clodhub/video-calls", "version": "0.1.2",
             "digest": "2acd6afd9cea6a8931717a4793557231bcb2acf999fef8e3ddc3218ec28993e6"}
 SOURCE_DIGEST = "c030d34518c9089d08fc51ff478a0a4b3bd6a80e9a9a62ebef0a4595325cb358"
 CONTEXT_DIGEST = "5414ee4feb104c9d57ba2582c20bebfaa3d1e6793270e5b0a7bdf666a7614af7"
