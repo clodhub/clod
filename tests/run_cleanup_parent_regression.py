@@ -11,10 +11,10 @@ import threading
 import time
 from unittest.mock import patch
 
-from aepm.contextual import tool_environment
-from aepm.io import VerificationDirectory
-from aepm.private_process import DarwinBackend
-from aepm.process import run
+from clod.contextual import tool_environment
+from clod.io import VerificationDirectory
+from clod.private_process import DarwinBackend
+from clod.process import run
 from tests.run_cleanup_concurrency import CHILD, Trace
 from tests.run_cleanup_exit_capability import hashes, remaining, require, write
 

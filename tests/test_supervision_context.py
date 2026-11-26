@@ -8,10 +8,10 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-from aepm import contextual
-from aepm.io import load
-from aepm.model import AepmError, canonical, digest
-from aepm.supervision import Recorder, supervision_step_index, validate_log_index
+from clod import contextual
+from clod.io import load
+from clod.model import ClodError, canonical, digest
+from clod.supervision import Recorder, supervision_step_index, validate_log_index
 from tests.windows import test_native_process as windows
 
 
@@ -42,7 +42,7 @@ class ContextualObservationTests(unittest.TestCase):
 
         def check_time():
             if expired and state["ran"]:
-                raise AepmError("authorization-expired", "fixture")
+                raise ClodError("authorization-expired", "fixture")
 
         execution = SimpleNamespace(check_time=check_time, run_id="fixture", authorization=None, selection=lambda suite: ("local", {}),
                                     prepare=lambda *_: ("local", {"settings": {}, "operations": [], "simulationKind": None},
@@ -51,7 +51,7 @@ class ContextualObservationTests(unittest.TestCase):
         def run(_argv, _cwd, _environment, _timeout, _limit, *, diagnostics):
             state["ran"] = True
             if failed:
-                error = AepmError("cleanup-failed", "private-process-directory")
+                error = ClodError("cleanup-failed", "private-process-directory")
                 diagnostics.fault("sample", error=error)
                 diagnostics.stopped("sample", "exception", error)
             else:
@@ -62,7 +62,7 @@ class ContextualObservationTests(unittest.TestCase):
 
         def resource(_value):
             if state["ran"]:
-                raise AepmError("resource-changed", "fixture")
+                raise ClodError("resource-changed", "fixture")
 
         with ExitStack() as stack:
             for name, value in (("VerificationDirectory", Mock(return_value=workspace)),

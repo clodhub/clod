@@ -7,8 +7,8 @@ import time
 import unittest
 from unittest.mock import Mock
 
-from aepm.model import AepmError
-from aepm.private_process import CaptureRace, CombinedInfo, DarwinBackend, Identity
+from clod.model import ClodError
+from clod.private_process import CaptureRace, CombinedInfo, DarwinBackend, Identity
 from tests import test_private_process as fixtures
 
 if os.name == "nt":
@@ -52,7 +52,7 @@ class DarwinExitQueryTests(unittest.TestCase):
 
     def test_partial_and_denied_records_fail(self):
         for failure in ((191, 0), (0, errno.EPERM), (0, errno.EACCES), (0, errno.EINVAL)):
-            with self.subTest(failure=failure), self.assertRaises(AepmError):
+            with self.subTest(failure=failure), self.assertRaises(ClodError):
                 self.backend(failure=failure).capture(100)
 
     def test_live_unreadable_path_fails(self):
@@ -63,7 +63,7 @@ class DarwinExitQueryTests(unittest.TestCase):
             return 0
 
         backend.path.side_effect = denied
-        with self.assertRaisesRegex(AepmError, "private-process-path"):
+        with self.assertRaisesRegex(ClodError, "private-process-path"):
             backend.capture(100)
         backend.send.assert_not_called()
 
@@ -97,7 +97,7 @@ class DarwinExitQueryTests(unittest.TestCase):
             return 0
 
         backend.path.side_effect = vanished
-        with self.assertRaisesRegex(AepmError, "private-process-discovery") as caught:
+        with self.assertRaisesRegex(ClodError, "private-process-discovery") as caught:
             backend.capture(100)
         self.assertIsInstance(caught.exception, CaptureRace)
         self.assertEqual(backend.info.call_count, 4)
@@ -125,7 +125,7 @@ class DarwinExitQueryTests(unittest.TestCase):
         backend.info.side_effect = info
         backend.path.side_effect = path
         backend.extended.side_effect = directory
-        with self.assertRaisesRegex(AepmError, "private-process-discovery"):
+        with self.assertRaisesRegex(ClodError, "private-process-discovery"):
             backend.capture(100)
         backend.send.assert_not_called()
 

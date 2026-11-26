@@ -6,8 +6,8 @@ import ctypes as c
 import threading
 from unittest.mock import patch
 
-from aepm.model import AepmError, canonical
-from aepm.private_process import CombinedInfo
+from clod.model import ClodError, canonical
+from clod.private_process import CombinedInfo
 
 
 LOCATIONS = frozenset("private-process-discovery private-process-identity private-process-path private-process-directory".split())
@@ -55,7 +55,7 @@ class DiscoveryObserver:
         item = {"stage": stage, "attempt": root["attempts"], "confirmation": depth > 0,
                 "result": result if type(result) is int and -9223372036854775808 <= result <= 9223372036854775807 else None,
                 "error": error_number, "raised": None if raised is None else
-                "AepmError" if isinstance(raised, AepmError) else "OSError" if isinstance(raised, OSError) else "other"}
+                "ClodError" if isinstance(raised, ClodError) else "OSError" if isinstance(raised, OSError) else "other"}
         if stage == "list":
             capacity = args[3]
             item.update(capacity=capacity, integerWidth=c.sizeof(c.c_int))
@@ -110,7 +110,7 @@ class DiscoveryObserver:
                     "attempts": min(root["attempts"], 3), "failureDepth": root["failureDepth"],
                     "stages": deepcopy(root["stages"]), "truncated": root["truncated"],
                     "unavailable": root["unavailable"],
-                    "exception": "AepmError" if isinstance(error, AepmError) else "OSError" if isinstance(error, OSError) else "other",
+                    "exception": "ClodError" if isinstance(error, ClodError) else "OSError" if isinstance(error, OSError) else "other",
                     "location": location if isinstance(location, str) and location in LOCATIONS else "redacted"}
         if len(canonical(document)) > 7168:
             document.update(stages=[], truncated=True, unavailable=True)

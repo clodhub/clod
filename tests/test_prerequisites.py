@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from aepm.model import AepmError, canonical, digest, validate_component
-from aepm.verification import declarations, execute_suite, summary
+from clod.model import ClodError, canonical, digest, validate_component
+from clod.verification import declarations, execute_suite, summary
 from tests.core.test_core import fixture
 
 
@@ -25,7 +25,7 @@ class PrerequisiteTests(unittest.TestCase):
             with self.subTest(label=label):
                 manifest = deepcopy(self.manifest)
                 manifest["verification"][0]["requirements"] = [label]
-                with self.assertRaises(AepmError):
+                with self.assertRaises(ClodError):
                     validate_component(manifest)
         self.manifest["verification"][0]["requirements"] = ["external:livekit-project"]
         validate_component(self.manifest)
@@ -35,7 +35,7 @@ class PrerequisiteTests(unittest.TestCase):
         for scope in ("required-local", "platform", "deployed"):
             suite = {**self.manifest["verification"][0], "package": "a" * 64, "id": scope, "scope": scope,
                      "requirements": ["external:windows-host", "external:livekit-project"]}
-            with patch("aepm.verification.run", side_effect=AssertionError("must not execute")):
+            with patch("clod.verification.run", side_effect=AssertionError("must not execute")):
                 result = execute_suite(suite, self.root / "package", True, self.root / "logs")
             self.assertEqual(result["status"], "blocked")
             self.assertIsNone(result["exitCode"])
@@ -45,7 +45,7 @@ class PrerequisiteTests(unittest.TestCase):
 
     def test_empty_requirements_still_check_installed_tools(self):
         suite = {**self.manifest["verification"][0], "package": "a" * 64,
-                 "tools": {"aepm_nonexistent_compiler": "1.0"}}
+                 "tools": {"clod_nonexistent_compiler": "1.0"}}
         result = execute_suite(suite, self.root / "package", False, self.root / "logs")
         self.assertEqual((result["status"], result["reason"]), ("blocked", "tool-unavailable"))
 
@@ -53,7 +53,7 @@ class PrerequisiteTests(unittest.TestCase):
         refs = [{"digest": "b" * 64}, {"digest": "a" * 64}]
         manifests = {ref["digest"]: deepcopy(self.manifest) for ref in refs}
         records = declarations(refs, manifests, "review")
-        from aepm.foundations import class_suites
+        from clod.foundations import class_suites
         expected = sorted([{**suite, "package": ref["digest"]} for ref in refs
                            for suite in [*self.manifest["verification"], *class_suites(self.manifest)]], key=lambda item: (item["package"], item["id"]))
         self.assertEqual(records, expected)
@@ -61,5 +61,5 @@ class PrerequisiteTests(unittest.TestCase):
         changed[0]["requirements"] = ["external:changed"]
         self.assertNotEqual(digest(canonical(records)), digest(canonical(changed)))
         manifests[refs[0]["digest"]]["verification"].append(self.manifest["verification"][0])
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             declarations(refs, manifests, "review")

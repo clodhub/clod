@@ -5,10 +5,10 @@ import shutil
 import unittest
 from unittest.mock import patch
 
-from aepm.environment import materialize, resource_records, validate_resource, prepare_working_resources, describe_resource
-from aepm.contextual import tool_environment, tool_versions
-from aepm.process import run
-from aepm.model import AepmError, canonical, digest
+from clod.environment import materialize, resource_records, validate_resource, prepare_working_resources, describe_resource
+from clod.contextual import tool_environment, tool_versions
+from clod.process import run
+from clod.model import ClodError, canonical, digest
 
 
 class ResourceTests(unittest.TestCase):
@@ -26,12 +26,12 @@ class ResourceTests(unittest.TestCase):
         copied = materialize(self.resource, self.root / "private")
         self.assertEqual(resource_records(copied), resource_records(self.resource))
         (Path(copied["path"]) / "lock").write_text("altered")
-        with self.assertRaisesRegex(AepmError, "resource-changed"):
+        with self.assertRaisesRegex(ClodError, "resource-changed"):
             validate_resource(copied)
 
     def test_declared_root_kind_must_match(self):
         for changed in ({**self.resource, "kind": "file"}, {**self.resource, "path": str(self.source / "lock")}):
-            with self.assertRaisesRegex(AepmError, "resource-kind"):
+            with self.assertRaisesRegex(ClodError, "resource-kind"):
                 resource_records(changed)
 
     @unittest.skipIf(os.name == "nt", "Windows rejects reparse points")
@@ -41,16 +41,16 @@ class ResourceTests(unittest.TestCase):
         copied = materialize(self.resource, self.root / "private")
         self.assertFalse((Path(copied["path"]) / "alias").is_symlink())
         (self.source / "cycle").symlink_to(self.source)
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             resource_records(self.resource)
         (self.source / "cycle").unlink()
         (self.root / "outside").write_text("outside")
         (self.source / "escape").symlink_to(self.root / "outside")
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             resource_records(self.resource)
 
     def test_source_change_during_copy_rejects(self):
-        from aepm import copying
+        from clod import copying
         original = copying.copy_file
 
         def changed(source, target, **options):
@@ -63,7 +63,7 @@ class ResourceTests(unittest.TestCase):
             self.resource["digest"] = digest(canonical(resource_records(self.resource)))
             target = self.root / ("private-clones" if clones else "private-bytes")
             with self.subTest(clones=clones), patch.dict(copying._CLONES, {"enabled": clones}), \
-                    patch("aepm.copying.copy_file", changed), self.assertRaises(AepmError):
+                    patch("clod.copying.copy_file", changed), self.assertRaises(ClodError):
                 materialize(self.resource, target)
 
     @unittest.skipIf(os.name == "nt", "POSIX symbolic links required")
@@ -84,20 +84,20 @@ class ResourceTests(unittest.TestCase):
         resource["digest"] = digest(canonical(records))
         validate_resource(resource)
         (framework / "tool").write_text("modified target")
-        with self.assertRaisesRegex(AepmError, "resource-changed"):
+        with self.assertRaisesRegex(ClodError, "resource-changed"):
             validate_resource(resource)
         (developer / "alias").unlink()
         (developer / "alias").symlink_to("../SharedFrameworks/./tool")
         self.assertNotEqual(digest(canonical(resource_records(resource))), resource["digest"])
         (developer / "loop-a").symlink_to("loop-b")
         (developer / "loop-b").symlink_to("loop-a")
-        with self.assertRaisesRegex(AepmError, "resource-cycle"):
+        with self.assertRaisesRegex(ClodError, "resource-cycle"):
             resource_records(resource)
 
     def test_inventory_root_refused_for_copies_and_wrong_relation(self):
         for resource in ({**self.resource, "inventoryRoot": str(self.root)},
                          {**self.resource, "id": "appleDeveloperDirectory", "inventoryRoot": str(self.root)}):
-            with self.assertRaisesRegex(AepmError, "resource-boundary"):
+            with self.assertRaisesRegex(ClodError, "resource-boundary"):
                 resource_records(resource)
 
     def test_four_hundred_three_executable_inputs_are_representable(self):
@@ -148,7 +148,7 @@ class ResourceTests(unittest.TestCase):
         target = working / "platform-tools/adb"
         target.unlink()
         target.symlink_to(platform_tools / "adb")
-        with self.assertRaisesRegex(AepmError, "resource-changed"):
+        with self.assertRaisesRegex(ClodError, "resource-changed"):
             tool_environment(self.root / "other-home", {"adb": "1"}, [resource])
 
     @unittest.skipIf(os.name == "nt", "Simulated POSIX installed-tool fixture")

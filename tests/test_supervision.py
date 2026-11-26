@@ -8,11 +8,11 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-from aepm.model import AepmError, canonical, digest
-from aepm.supervision import Recorder, observe, supervision_step_index, validate_log_index
-from aepm import process
-from aepm.private_process import Identity, PrivateScope
-from aepm.posix_process import ContainedProcess
+from clod.model import ClodError, canonical, digest
+from clod.supervision import Recorder, observe, supervision_step_index, validate_log_index
+from clod import process
+from clod.private_process import Identity, PrivateScope
+from clod.posix_process import ContainedProcess
 
 import os
 if os.name == "nt":
@@ -54,7 +54,7 @@ class SupervisionContractTests(unittest.TestCase):
         b, eb, _, pb = self.fixture(1)
         self.assertEqual(validate_log_index(self.suite, [a, b, ea, eb], self.root), (pa, pb))
         for events in ([a, ea, b, eb], [a, b, eb, ea], [a, ea, ea], [ea]):
-            with self.subTest(events=events), self.assertRaises(AepmError):
+            with self.subTest(events=events), self.assertRaises(ClodError):
                 validate_log_index(self.suite, events, self.root)
 
     def test_reserved_discriminator_rejection(self):
@@ -62,7 +62,7 @@ class SupervisionContractTests(unittest.TestCase):
         for step in (0, None, "cleanup", "validation-inputs"):
             self.assertIsNone(supervision_step_index(step))
         for step in ("supervisor-v2/0", "supervisor-v1/01", "supervisor-v1/-1", "supervisor-v1/", "supervisor-other"):
-            with self.subTest(step=step), self.assertRaises(AepmError) as caught:
+            with self.subTest(step=step), self.assertRaises(ClodError) as caught:
                 supervision_step_index(step)
             self.assertEqual((caught.exception.code, caught.exception.path), ("result-invalid", "verification"))
 
@@ -70,21 +70,21 @@ class SupervisionContractTests(unittest.TestCase):
         command, event, document, path = self.fixture()
         original = path.read_bytes()
         path.unlink()
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             validate_log_index(self.suite, [command, event], self.root)
         path.write_bytes(original + b" ")
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             validate_log_index(self.suite, [command, event], self.root)
         path.unlink()
         target = self.root / "target"
         target.write_bytes(original)
         path.symlink_to(target)
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             validate_log_index(self.suite, [command, event], self.root)
         raw = original + b"\n"
         event["logDigest"] = digest(raw)
         (self.root / (digest(raw) + ".log")).write_bytes(raw)
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             validate_log_index(self.suite, [command, event], self.root)
 
     def test_schema_version_bounds_and_binding_rejected(self):
@@ -95,12 +95,12 @@ class SupervisionContractTests(unittest.TestCase):
             value = {**deepcopy(document), **change}
             with self.subTest(change=change):
                 self.replace_document(event, value)
-                with self.assertRaises(AepmError):
+                with self.assertRaises(ClodError):
                     validate_log_index(self.suite, [command, event], self.root)
 
     def test_recorder_preserves_first_cause_and_redacts_messages(self):
         recorder = Recorder()
-        first = AepmError("cleanup-failed", "private-process-directory")
+        first = ClodError("cleanup-failed", "private-process-directory")
         recorder.fault("sample", error=first)
         recorder.stopped("sample", "exception", first)
         recorder.fault("reap", error=OSError("SECRET_MESSAGE"))
@@ -117,7 +117,7 @@ class SupervisionContractTests(unittest.TestCase):
 
     def test_unknown_path_and_recorder_failure_do_not_escape(self):
         recorder = Recorder()
-        recorder.fault("sample", error=AepmError("cleanup-failed", "SECRET_PATH"))
+        recorder.fault("sample", error=ClodError("cleanup-failed", "SECRET_PATH"))
         self.assertNotIn(b"SECRET_PATH", canonical(recorder.document(self.suite, 0, False)))
         with patch.object(recorder, "stopped", side_effect=RuntimeError("broken recorder")):
             observe(recorder, "stopped", "sample", "exception")
@@ -134,7 +134,7 @@ class SimulatedRunnerObservationTests(unittest.TestCase):
         def sample():
             calls.append("sample")
             if fault:
-                raise AepmError("cleanup-failed", "private-process-directory")
+                raise ClodError("cleanup-failed", "private-process-directory")
 
         def terminate():
             calls.append("terminate")
@@ -166,7 +166,7 @@ class SimulatedRunnerObservationTests(unittest.TestCase):
                 return instance_thread
             return thread
 
-        with patch("aepm.posix_process.ContainedProcess", return_value=instance), \
+        with patch("clod.posix_process.ContainedProcess", return_value=instance), \
                 patch.object(process.threading, "Thread", side_effect=thread_factory), \
                 patch.object(process.queue, "Queue", return_value=messages), \
                 patch.object(process.time, "monotonic", return_value=1):
@@ -262,18 +262,18 @@ class SimulatedCleanupObservationTests(unittest.TestCase):
                 scope.backend.refresh.return_value = record
                 scope._scan = Mock()
                 if failure == "scan":
-                    scope._scan.side_effect = AepmError("cleanup-failed", "private-process-directory")
+                    scope._scan.side_effect = ClodError("cleanup-failed", "private-process-directory")
                 if failure == "refresh":
-                    scope.backend.refresh.side_effect = AepmError("cleanup-failed", "private-process-identity")
+                    scope.backend.refresh.side_effect = ClodError("cleanup-failed", "private-process-identity")
                 if failure == "signal":
-                    scope.backend.terminate.side_effect = AepmError("cleanup-failed", "private-process-signal")
+                    scope.backend.terminate.side_effect = ClodError("cleanup-failed", "private-process-signal")
                 clock = [0.0]
 
                 def sleep(seconds):
                     clock[0] += seconds
 
-                with patch("aepm.private_process.time.monotonic", side_effect=lambda: clock[0]), \
-                        patch("aepm.private_process.time.sleep", side_effect=sleep):
+                with patch("clod.private_process.time.monotonic", side_effect=lambda: clock[0]), \
+                        patch("clod.private_process.time.sleep", side_effect=sleep):
                     self.assertFalse(scope.finish(.2))
                 self.assertEqual(recorder.failure["observation"]["phase"], phase)
                 self.assertEqual(recorder.failure["observation"]["kind"],
@@ -284,7 +284,7 @@ class SimulatedCleanupObservationTests(unittest.TestCase):
         instance = ContainedProcess.__new__(ContainedProcess)
         instance.diagnostics = recorder
         instance.signaling_finished = instance.cleaned = False
-        instance.observe_exit = Mock(side_effect=AepmError("cleanup-failed", "child-ownership"))
+        instance.observe_exit = Mock(side_effect=ClodError("cleanup-failed", "child-ownership"))
         self.assertFalse(instance.terminate_tree())
         self.assertTrue(instance.signaling_finished)
         recorder.fault("reap", error=OSError("later failure"))
@@ -293,7 +293,7 @@ class SimulatedCleanupObservationTests(unittest.TestCase):
 
     def test_unavailable_final_slot_preserves_first_cause(self):
         recorder = Recorder()
-        recorder.fault("sample", error=AepmError("cleanup-failed", "private-process-path"))
+        recorder.fault("sample", error=ClodError("cleanup-failed", "private-process-path"))
         recorder.finish(0, "", True, True, True)
         recorder.final["outcome"]["privateFailed"] = "invalid"
         document = recorder.document({"package": "a" * 64, "id": "fixture"}, 0, False)

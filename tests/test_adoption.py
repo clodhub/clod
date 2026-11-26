@@ -7,10 +7,10 @@ import signal
 import time
 from unittest.mock import Mock, patch
 
-from aepm import contextual, private_process, update, verification
-from aepm.supervision import Recorder, validate_document, validate_log_index
-from aepm.model import AepmError
-from aepm.private_process import Identity, PrivateScope, adoption_root, enroll_root
+from clod import contextual, private_process, update, verification
+from clod.supervision import Recorder, validate_document, validate_log_index
+from clod.model import ClodError
+from clod.private_process import Identity, PrivateScope, adoption_root, enroll_root
 from tests.test_capture_race import Guarded
 from tests.test_private_process import FakeBackend
 
@@ -48,8 +48,8 @@ class AdoptionTests(Guarded):
         return root
 
     def build(self, backend, root, anchor="default"):
-        with patch("aepm.private_process.DarwinBackend", return_value=backend), \
-                patch("aepm.private_process.LinuxBackend", return_value=backend):
+        with patch("clod.private_process.DarwinBackend", return_value=backend), \
+                patch("clod.private_process.LinuxBackend", return_value=backend):
             scope = PrivateScope(root, adoption_root=self.anchor if anchor == "default" else anchor)
         self.addCleanup(scope.close)
         return scope
@@ -79,7 +79,7 @@ class AdoptionTests(Guarded):
 
     def assert_conflict(self, record, **options):
         backend, scope, root = self.later_step(record, **options)
-        with self.assertRaises(AepmError) as caught:
+        with self.assertRaises(ClodError) as caught:
             scope.scan(force=True)
         self.assertEqual((caught.exception.code, caught.exception.path), ("cleanup-failed", "private-process-conflict"))
         self.assertEqual(backend.signals, [])
@@ -108,7 +108,7 @@ class AdoptionTests(Guarded):
         backend.records[8000] = Identity(8000, 8000, os.geteuid(), 4242, 8000, 2, "/outside/other", str(root / "root"),
                                          started_ns=1)
         scope.baseline.add(8000)
-        with self.assertRaises(AepmError) as caught:
+        with self.assertRaises(ClodError) as caught:
             scope.scan(force=True)
         self.assertEqual(caught.exception.path, "private-process-conflict")
         second = json.loads((root / "conflict-2.json").read_text())
@@ -161,14 +161,14 @@ class AdoptionTests(Guarded):
         root = self.private_root("phone")
         inside = self.daemon(started)
         inside.cwd = str(root / "root/ios")
-        with self.assertRaises(AepmError) as caught:
+        with self.assertRaises(ClodError) as caught:
             enroll_root(root, backend=FakeBackend({7000: inside}))
         self.assertEqual(caught.exception.path, "private-process-conflict")
         root2 = self.private_root("phone2")
         enroll_root(root2, backend=FakeBackend({7000: self.daemon(started)}))
         inside2 = self.daemon(started)
         inside2.cwd = str(root2)
-        with self.assertRaises(AepmError) as caught:
+        with self.assertRaises(ClodError) as caught:
             self.build(FakeBackend({7000: inside2}), root2)
         self.assertEqual(caught.exception.path, "private-process-conflict")
 
@@ -201,7 +201,7 @@ class AdoptionLogTests(AdoptionTests):
         scope.bind(300)
         for record in backend.records.values():
             record.cwd = str(root / "root/ios")
-        with self.assertRaises(AepmError) as caught:
+        with self.assertRaises(ClodError) as caught:
             scope.scan(force=True)
         self.assertEqual(caught.exception.path, "private-process-conflict")
         self.assertEqual(len(scope.adopted), 8)
@@ -225,12 +225,12 @@ class AdoptionLogTests(AdoptionTests):
 
         def run(argv, cwd, environment, timeout, limit, *, diagnostics=None, adoption_root=None, **_):
             backend = FakeBackend({7000: self.daemon(started)})
-            with patch("aepm.private_process.DarwinBackend", return_value=backend):
-                scope = PrivateScope(environment["AEPM_PRIVATE_ROOT"], diagnostics=diagnostics, adoption_root=adoption_root)
+            with patch("clod.private_process.DarwinBackend", return_value=backend):
+                scope = PrivateScope(environment["CLOD_PRIVATE_ROOT"], diagnostics=diagnostics, adoption_root=adoption_root)
             try:
                 scope.bind(300)
                 if adopt:
-                    backend.records[7000].cwd = str(Path(environment["AEPM_PRIVATE_ROOT"]) / "root")
+                    backend.records[7000].cwd = str(Path(environment["CLOD_PRIVATE_ROOT"]) / "root")
                 scope.scan(force=True)
                 cleaned = scope.finish(time.monotonic() + 1)
             finally:
@@ -242,7 +242,7 @@ class AdoptionLogTests(AdoptionTests):
         logs = self.root / ("logs-%d" % len(self.roots))
         with patch.object(contextual, "VerificationDirectory", return_value=workspace), \
                 patch.object(contextual, "tool_environment", side_effect=lambda home, *a, **k: {"PATH": "/usr/bin",
-                             "AEPM_PRIVATE_ROOT": str(home.parent)}), \
+                             "CLOD_PRIVATE_ROOT": str(home.parent)}), \
                 patch.object(contextual, "tool_versions", return_value={}), \
                 patch.object(contextual, "prerequisites", return_value=[]), \
                 patch.object(contextual, "resolve_command", side_effect=lambda argv, *a, **k: argv), \
@@ -297,7 +297,7 @@ class AdoptionSlotTests(Guarded):
                  [{**good, "windowIndex": 4096}], [{**good, "windowIndex": -1}], [{**good, "windowIndex": True}],
                  [{**good, "uniqueIdentity": 2 ** 53}], [{**good, "generation": 2 ** 32}], {"not": "a list"}]
         for index, adoptions in enumerate(cases):
-            with self.subTest(index=index), self.assertRaises(AepmError):
+            with self.subTest(index=index), self.assertRaises(ClodError):
                 self.check(self.document(adoptions))
 
     def test_recorder_bounds_and_failure_never_raise(self):
@@ -322,7 +322,7 @@ class AdoptionRootTests(Guarded):
         link.symlink_to(target)
         (self.root / "file").write_text("x")
         for value in ("relative/path", str(self.root / "absent"), str(self.root / "file"), str(link / "."), str(link), 42):
-            with self.subTest(value=value), self.assertRaises(AepmError) as caught:
+            with self.subTest(value=value), self.assertRaises(ClodError) as caught:
                 adoption_root(value)
             self.assertEqual((caught.exception.code, caught.exception.path), ("adoption-root-invalid", "adoptionRoot"))
 
@@ -330,7 +330,7 @@ class AdoptionRootTests(Guarded):
         for call in (lambda: verification.verify_application(self.root, self.root / "p", True, adoption_root="relative"),
                      lambda: verification.review_package({}, self.root, self.root / "p", True, adoption_root="relative"),
                      lambda: update.propose(self.root, {}, self.root, self.root / "p", True, adoption_root="relative")):
-            with self.assertRaises(AepmError) as caught:
+            with self.assertRaises(ClodError) as caught:
                 call()
             self.assertEqual(caught.exception.code, "adoption-root-invalid")
         source = Path(update.__file__).read_text()
@@ -345,13 +345,13 @@ class AdoptionRootTests(Guarded):
                   "reason": "tool-unavailable", "logDigest": "0" * 64}
         execution = Mock()
         execution.publish.side_effect = lambda report, records: report
-        with patch("aepm.trust.load_policy", return_value={"trustedExecution": ["a" * 64]}), \
+        with patch("clod.trust.load_policy", return_value={"trustedExecution": ["a" * 64]}), \
                 patch.object(verification, "declarations", return_value=suites), \
-                patch("aepm.authorization.bindings", return_value={}), \
-                patch("aepm.environment.Execution", return_value=execution), \
+                patch("clod.authorization.bindings", return_value={}), \
+                patch("clod.environment.Execution", return_value=execution), \
                 patch.object(verification, "execute_suite",
                              side_effect=lambda *a, **k: seen.append(("ordinary", k.get("adoption_root"))) or {**result, "id": "ordinary"}), \
-                patch("aepm.contextual.execute",
+                patch("clod.contextual.execute",
                       side_effect=lambda *a, **k: seen.append(("contextual", k.get("adoption_root"))) or
                       ({**result, "id": "contextual"}, {})):
             verification.make_report({"packages": [{"digest": "a" * 64, "name": "x", "version": "1.0.0", "dependencies": []}]},

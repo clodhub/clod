@@ -6,9 +6,9 @@ import json
 import os
 import stat
 
-from aepm.model import AepmError
-from aepm.private_process import DarwinBackend, DiscoveryFailure, enroll_root
-from aepm.supervision import Recorder
+from clod.model import ClodError
+from clod.private_process import DarwinBackend, DiscoveryFailure, enroll_root
+from clod.supervision import Recorder
 from tests.test_capture_race import Guarded
 from tests.test_conflict_record import process
 from tests.test_private_process import FakeBackend
@@ -62,7 +62,7 @@ class DiscoveryFailureTests(Guarded):
             with self.subTest(count=count), self.assertRaises(DiscoveryFailure) as caught:
                 listing_backend(count, number).pids()
             error = caught.exception
-            self.assertIsInstance(error, AepmError)
+            self.assertIsInstance(error, ClodError)
             self.assertEqual((error.code, error.path, error.errno, error.returned, error.capacity),
                              ("cleanup-failed", "private-process-discovery", number, count, CAPACITY))
 

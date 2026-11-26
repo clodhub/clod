@@ -4,19 +4,33 @@
 
 | Document | Format | An earlier format is refused with |
 |---|---|---|
-| Package manifest (`component.json`) | 3 | `manifest-format-outdated` |
-| Class descriptor (`class.json`, and each descriptor embedded in a manifest) | 2 | `class-format-outdated` |
-| `recipe.json` | 2 | `recipe-format-outdated` |
+| Package manifest (`component.json`) | 4 | `manifest-format-outdated` |
+| Class descriptor (`class.json`, and each descriptor embedded in a manifest) | 3 | `class-format-outdated` |
+| `recipe.json` | 3 | `recipe-format-outdated` |
 | `categories.json` | 1 | none earlier |
 | Release and guardian statements | in-toto statement v1 with the release and guardian predicate types | none earlier |
-| Review and verification report | 2 (with an execution record), 1 (without) | `report-format-outdated` for results without `storage` or `locks` |
-| `.aepm/definition.json` | 2 | `definition-format-outdated` |
-| `.aepm/lock.json` | 1 | none earlier |
-| Update proposal | 2 | `proposal-format-outdated` |
+| Review and verification report | 4 (with an execution record), 3 (without) | `invalid-report`; `report-format-outdated` for results without `storage` or `locks` |
+| `.clod/definition.json` | 3 | `definition-format-outdated` |
+| `.clod/lock.json` | 2 | `invalid-format` |
+| `.clod/assembly.json` | 2 | `invalid-format` |
+| A store's `catalogue.json` | 2 | `invalid-format` |
+| Update proposal | 3 | `proposal-format-outdated` |
 
-The catalogue entry API is defined by the catalogue, not by aepm.
+The catalogue entry API is defined by the catalogue, not by clod.
 
-## Package manifest, format 3
+## Package names
+
+A package is named by its package URL without a version, `pkg:clod/<namespace>/<name>` (papers/package-urls.md); `tests/fixtures/package-name-cases.json` is the shared corpus, byte-identical with the catalogue's (sha256 `968b567c05252f10fe2bfe6b727af8a93e8c6f9283abc3bf13ee65ea9d83723c`).
+
+- The namespace is one lower-case reverse domain name of at least two labels, at most 100 characters; each label is 1 to 63 of `a-z`, `0-9` and `-`, not starting or ending with `-`, and the first starts with a letter. Every library package is in `com.clodhub`.
+- The name starts with a letter, then letters, digits and single hyphens, 2 to 64 characters, not `search`. A name ending in `-class` is a class, one ending in `-recipe` a recipe, any other a component; a manifest's kind must be its name's kind.
+- Versions are `MAJOR.MINOR.PATCH`, each 0 or up to 9 digits without a leading zero; components and recipes may add `-preview.N`. Joined with `@` a name and version form the versioned package URL, `pkg:clod/com.clodhub/presence@0.11.0`, which the release and guardian statements and the bill of materials carry.
+- Interface types and data format names are `<namespace>/<name>` with the same rules, for example `com.clodhub/card-deck`; they are not package URLs.
+- A component installs under `components/<name>/`; its visual definition's `id` is `<namespace>.<name>` and its `package` the package name; a recipe's default application id is `<namespace>.<name>`.
+- On the command line `<name>` means `pkg:clod/com.clodhub/<name>` and `<namespace>/<name>` means `pkg:clod/<namespace>/<name>`, each with `@<version>`; files hold the full form.
+- `clod.model.parse_package(value, versioned=False)` returns `{namespace, name, kind, version}`, and `clod.model.parse_interface(value)` returns `{namespace, name}`, or None.
+
+## Package manifest, format 4
 
 Each check's `execution` is optional: a check without it runs in a private copy with no resources and no assertions; a check with it runs with its supplied context. `upgrade` is `{migration}`. These fields are required:
 
@@ -28,21 +42,21 @@ Advisory ids are an upper-case prefix, a hyphen, then letters, digits, `.`, `:`,
 
 ## Categories
 
-`classes/categories.json` is `{"format": 1, "categories": [{"id", "title", "parent"}]}`. Ids are unique paths of lower-case segments of letters, digits and hyphens joined by `/`; a top-level id's parent is null and a nested id's parent is the id less its last segment (`category-parent`), and is present (`category-unknown`). `aepm.foundations.validate_categories(document, class_categories)` checks this and that each given class category exists. aepm checks only a class's category form; the class generator, the publish tool and the catalogue check that it exists.
+`classes/categories.json` is `{"format": 1, "categories": [{"id", "title", "parent"}]}`. Ids are unique paths of lower-case segments of letters, digits and hyphens joined by `/`; a top-level id's parent is null and a nested id's parent is the id less its last segment (`category-parent`), and is present (`category-unknown`). `clod.foundations.validate_categories(document, class_categories)` checks this and that each given class category exists. clod checks only a class's category form; the class generator, the publish tool and the catalogue check that it exists.
 
 ## Package URLs
 
-Upstream `purl` and compatibility dependency names follow section 6a of the catalogue format paper, the rule the catalogue applies; `tests/fixtures/purl-cases.json` is the shared corpus, byte-identical with the catalogue's (sha256 `84e429d012f0931f6db2e67f2e4d2f61b76fab24b7a23a4e2ec6ea688563b470`).
+Upstream `purl` and compatibility dependency names follow section 6a of the catalogue format paper, the rule the catalogue applies; `tests/fixtures/purl-cases.json` is the shared corpus, byte-identical with the catalogue's (sha256 `c3943eda2a8175f40f9021fed195c2cbb12ca9bd8e2837742342c6bbc65b5601`). Upstream npm package URLs are written with the scope percent-encoded, `pkg:npm/%40scope/name@1.0.0`; both forms are accepted.
 
 - The raw string is printable ASCII (0x21 to 0x7E), at most 1000 characters, `pkg:` then a lower-case type `[a-z][a-z0-9.+-]*`, `/`, the namespace segments, a name that is non-empty and does not start with `@`, an optional `@version`, `?qualifiers` and `#subpath`. It is split at the first `#`, then at the first `?`.
 - Every part is percent-decoded strictly as UTF-8 and holds no character of Unicode category Cc, Cf, Zs, Zl, Zp, Co or Cs. Empty versions and namespace segments are refused.
-- `maven`, `golang`, `github`, `bitbucket` and `composer` need at least one namespace segment; `swift` at least two, a host containing a dot and then an owner; `npm` at most one `@scope`. `cargo`, `gem`, `pypi`, `nuget`, `hex`, `pub`, `cocoapods`, `hackage` and `conda` have none.
+- `maven`, `golang`, `github`, `bitbucket` and `composer` need at least one namespace segment; `swift` at least two, a host containing a dot and then an owner; `npm` at most one `@scope`; `clod` exactly one. `cargo`, `gem`, `pypi`, `nuget`, `hex`, `pub`, `cocoapods`, `hackage` and `conda` have none.
 - Qualifiers are `key=value` pairs joined by `&`, split at the first `=`; keys are `[a-z][a-z0-9._-]*`, unique, with non-empty values. Subpath segments are joined by `/` and none is empty, `.` or `..`. A trailing `?` or `#` with nothing after it is refused.
-- `aepm.foundations.parse_purl(value)` returns `{type, namespace, name, version, qualifiers, subpath}` (qualifiers sorted by key, version null when absent), or None.
+- `clod.foundations.parse_purl(value)` returns `{type, namespace, name, version, qualifiers, subpath}` (qualifiers sorted by key, version null when absent), or None.
 
 ## Package foundations
 
-All fields below are mandatory. Class references are exact `{name, version, digest}` objects. Names use `clodhub/<slug>`, class and interface versions use three nonnegative integers, package versions may add `-preview.N`, and digests are lowercase SHA-256. `digest` is the hash of the RFC 8785 canonical descriptor. Each descriptor is an object inside the canonical package manifest. Every inventory entry hashes one packaged file; interface and behaviour files belong to that inventory. Class identity conflicts within a selected graph are errors.
+All fields below are mandatory. Class references are exact `{name, version, digest}` objects. Class names are package names ending in `-class`, class and interface versions use three nonnegative integers, package versions may add `-preview.N`, and digests are lowercase SHA-256. `digest` is the hash of the RFC 8785 canonical descriptor. Each descriptor is an object inside the canonical package manifest. Every inventory entry hashes one packaged file; interface and behaviour files belong to that inventory. Class identity conflicts within a selected graph are errors.
 
 ## Manifest fields
 
@@ -55,8 +69,8 @@ These fields accompany the package manifest's other required fields. The complet
     "web": [{"name": "node", "versionRange": ">=22.0.0 <27.0.0", "probe": ["node", "--version"], "install": {"macos": ["brew", "install", "node"], "windows": ["winget", "install", "--exact", "--id", "OpenJS.NodeJS"], "linux": ["sudo", "apt-get", "install", "--yes", "nodejs"]}, "manual": null}],
     "server": [{"name": "node", "versionRange": ">=22.0.0 <27.0.0", "probe": ["node", "--version"], "install": {"macos": ["brew", "install", "node"], "windows": ["winget", "install", "--exact", "--id", "OpenJS.NodeJS"], "linux": ["sudo", "apt-get", "install", "--yes", "nodejs"]}, "manual": null}]
   },
-  "classes": [{"reference": {"name": "clodhub/counter-class", "version": "1.0.0", "digest": "a46f8d1353594c79f1c06c50b91c810fc38c0ac8919dc612d3c29d3fcf96cfe5"}, "descriptor": {"format": 2, "name": "clodhub/counter-class", "version": "1.0.0", "title": "Counter", "summary": "A number that goes up by one", "category": "examples/counters", "presentation": "visual", "provides": [{"type": "counter", "version": "1.0.0", "path": "classes/counter/interface.json", "modules": {"web": ["counter.mjs"], "server": ["counter.mjs"]}}], "requires": [], "settings": {"type": "object", "properties": {}, "required": [], "additionalProperties": false}, "inventory": [{"path": "classes/counter/interface.json", "digest": "316538fd92c18f09d76df05de128d1099d00d7cfbf34401f82b1bd56989ba0d2"}, {"path": "classes/counter/check.mjs", "digest": "7b6a4b0a9ba601c7c2f058f62d46b4d349c8010bd6c3f9f5d28b762209735770"}], "verification": [{"id": "behaviour", "root": "package", "argv": ["node", "classes/counter/check.mjs"], "cwd": ".", "prepare": [], "tools": {"node": "26"}, "fixtures": ["classes/counter/check.mjs"], "locks": [], "network": false, "timeoutSeconds": 30, "expectedExit": 0, "scope": "required-local", "requirements": []}]}}],
-  "implements": [{"name": "clodhub/counter-class", "version": "1.0.0", "digest": "a46f8d1353594c79f1c06c50b91c810fc38c0ac8919dc612d3c29d3fcf96cfe5"}],
+  "classes": [{"reference": {"name": "pkg:clod/com.clodhub/counter-class", "version": "1.0.0", "digest": "1be56b8267bce466095dc55ae78b72c78446203b2e62bd71c8a657307498d816"}, "descriptor": {"format": 3, "name": "pkg:clod/com.clodhub/counter-class", "version": "1.0.0", "title": "Counter", "summary": "A number that goes up by one", "category": "examples/counters", "presentation": "visual", "provides": [{"type": "com.clodhub/counter", "version": "1.0.0", "path": "classes/counter/interface.json", "modules": {"web": ["counter.mjs"], "server": ["counter.mjs"]}}], "requires": [], "settings": {"type": "object", "properties": {}, "required": [], "additionalProperties": false}, "inventory": [{"path": "classes/counter/interface.json", "digest": "8346ed68e5bc6bab6d1a4112b9b7eb6a137f61ebed4d63d99fe82482883aac76"}, {"path": "classes/counter/check.mjs", "digest": "042c16e9433fa57eb231b69b5d99b3037f97dc712786286f75e4ce845510610c"}], "verification": [{"id": "behaviour", "root": "package", "argv": ["node", "classes/counter/check.mjs"], "cwd": ".", "prepare": [], "tools": {"node": "26"}, "fixtures": ["classes/counter/check.mjs"], "locks": [], "network": false, "timeoutSeconds": 30, "expectedExit": 0, "scope": "required-local", "requirements": []}]}}],
+  "implements": [{"name": "pkg:clod/com.clodhub/counter-class", "version": "1.0.0", "digest": "1be56b8267bce466095dc55ae78b72c78446203b2e62bd71c8a657307498d816"}],
   "upstream": [],
   "compatibility": {
     "runtimes": {"node": ">=22.0.0 <27.0.0"},
@@ -81,24 +95,24 @@ A descriptor carries `title` (at most 256 characters), `summary` (at most 500), 
 
 ```json
 {
-  "format": 2,
-  "name": "clodhub/counter-class",
+  "format": 3,
+  "name": "pkg:clod/com.clodhub/counter-class",
   "version": "1.0.0",
   "title": "Counter",
   "summary": "A number that goes up by one",
   "category": "examples/counters",
   "presentation": "visual",
-  "provides": [{"type": "counter", "version": "1.0.0", "path": "classes/counter/interface.json", "modules": {"web": ["counter.mjs"], "server": ["counter.mjs"]}}],
+  "provides": [{"type": "com.clodhub/counter", "version": "1.0.0", "path": "classes/counter/interface.json", "modules": {"web": ["counter.mjs"], "server": ["counter.mjs"]}}],
   "requires": [],
   "settings": {"type": "object", "properties": {}, "required": [], "additionalProperties": false},
-  "inventory": [{"path": "classes/counter/interface.json", "digest": "316538fd92c18f09d76df05de128d1099d00d7cfbf34401f82b1bd56989ba0d2"}, {"path": "classes/counter/check.mjs", "digest": "7b6a4b0a9ba601c7c2f058f62d46b4d349c8010bd6c3f9f5d28b762209735770"}],
+  "inventory": [{"path": "classes/counter/interface.json", "digest": "8346ed68e5bc6bab6d1a4112b9b7eb6a137f61ebed4d63d99fe82482883aac76"}, {"path": "classes/counter/check.mjs", "digest": "042c16e9433fa57eb231b69b5d99b3037f97dc712786286f75e4ce845510610c"}],
   "verification": [{"id": "behaviour", "root": "package", "argv": ["node", "classes/counter/check.mjs"], "cwd": ".", "prepare": [], "tools": {"node": "26"}, "fixtures": ["classes/counter/check.mjs"], "locks": [], "network": false, "timeoutSeconds": 30, "expectedExit": 0, "scope": "required-local", "requirements": []}]
 }
 ```
 
-Inventory paths are package-relative and unique. All class suites are required-local package suites without external prerequisites; their working directory is `.`. A command starts with a declared tool followed by an inventory-bound script, or an inventory-bound `./script`. Their preparation scripts, fixtures and locks are inventory-bound. Shared tests load candidate source using `AEPM_CANDIDATE_ROOT`, `AEPM_CANDIDATE_MANIFEST`, `AEPM_CANDIDATE_DIGEST`, `AEPM_CLASS_DIGEST`, and `AEPM_MODULE_MAP` (a JSON object mapping declared installed destination to absolute staged source path). The runner supplies these only for class suites. Each suite receives a fresh candidate package copy and the class inventory's verified bytes. Class suites use the same explicit trusted execution, tool pins, network authorization, private directory and credential-free environment as package suites. Suite declarations and results bind the candidate archive and descriptor/inventory digests in signed review evidence.
+Inventory paths are package-relative and unique. All class suites are required-local package suites without external prerequisites; their working directory is `.`. A command starts with a declared tool followed by an inventory-bound script, or an inventory-bound `./script`. Their preparation scripts, fixtures and locks are inventory-bound. Shared tests load candidate source using `CLOD_CANDIDATE_ROOT`, `CLOD_CANDIDATE_MANIFEST`, `CLOD_CANDIDATE_DIGEST`, `CLOD_CLASS_DIGEST`, and `CLOD_MODULE_MAP` (a JSON object mapping declared installed destination to absolute staged source path). The runner supplies these only for class suites. Each suite receives a fresh candidate package copy and the class inventory's verified bytes. Class suites use the same explicit trusted execution, tool pins, network authorization, private directory and credential-free environment as package suites. Suite declarations and results bind the candidate archive and descriptor/inventory digests in signed review evidence.
 
-Settings use a closed JSON Schema subset: an object with `type`, `properties`, `required`, `additionalProperties: false`; properties have `type` (`string`, `boolean`, `integer`) and strings also have an anchored `pattern` equal to an aepm setting grammar. Candidate declarations must accept the class settings and must not introduce required settings without defaults.
+Settings use a closed JSON Schema subset: an object with `type`, `properties`, `required`, `additionalProperties: false`; properties have `type` (`string`, `boolean`, `integer`) and strings also have an anchored `pattern` equal to a clod setting grammar. Candidate declarations must accept the class settings and must not introduce required settings without defaults.
 
 ## Upstream and dependencies
 
@@ -187,7 +201,7 @@ A tool has exactly `name`, `versionRange`, `probe`, `install` and `manual`:
 
 - `name`: lowercase letters, digits, `.`, `+` and `-`, starting with a letter. Names are unique within a platform.
 - `versionRange`: the comparator subset used for runtimes.
-- `probe`: an argument list whose first item is a command name without a path; aepm finds it on `PATH` (version-manager shims resolve to the selected executable). The first version number in the combined output, `MAJOR[.MINOR[.PATCH]]` padded with zeros, is compared with the range. A probe exiting nonzero gives no version.
+- `probe`: an argument list whose first item is a command name without a path; clod finds it on `PATH` (version-manager shims resolve to the selected executable). The first version number in the combined output, `MAJOR[.MINOR[.PATCH]]` padded with zeros, is compared with the range. A probe exiting nonzero gives no version.
 - `install`: exactly `macos`, `windows` and `linux`, each null or an argument list beginning `brew install`, `winget install`, or `apt-get install` / `sudo apt-get install` respectively, with at least one further argument.
 - `manual`: text for steps no package manager performs, or null. A tool with no installer and no manual text is invalid.
 
@@ -195,7 +209,7 @@ Declarations of one tool name, within a package or across a graph, share identic
 
 ## Doctor
 
-`aepm doctor RECIPE@VERSION --store STORE [--answers FILE] [--install]` evaluates the design as `design` does, resolves its package graph, merges the toolchains of the selected targets, and probes each tool. It prints `{"ok": BOOL, "result": {host, targets, tools}}`, where `host` is `{os, architecture}` with `os` one of `macos`, `windows`, `linux`, and each tool is `{name, required, platforms, found, version, status, install, manual}`. `required` is the merged range in `>=X.Y.Z[ <X.Y.Z]` form, `found` is the resolved executable path or null, `status` is `ok`, `missing` or `wrong-version`, and `install` is the argument list for this host or null. `ok` is true only when every tool is `ok`; otherwise the command exits 1.
+`clod doctor RECIPE@VERSION --store STORE [--answers FILE] [--install]` evaluates the design as `design` does, resolves its package graph, merges the toolchains of the selected targets, and probes each tool. It prints `{"ok": BOOL, "result": {host, targets, tools}}`, where `host` is `{os, architecture}` with `os` one of `macos`, `windows`, `linux`, and each tool is `{name, required, platforms, found, version, status, install, manual}`. `required` is the merged range in `>=X.Y.Z[ <X.Y.Z]` form, `found` is the resolved executable path or null, `status` is `ok`, `missing` or `wrong-version`, and `install` is the argument list for this host or null. `ok` is true only when every tool is `ok`; otherwise the command exits 1.
 
 `--install` runs, one at a time, the host's install argument list for each `missing` tool that has one, writing `$ COMMAND` to standard error before each and sending installer output to standard error. It adds `installed: [{name, argv, exitCode}]` and probes again. Wrong versions and manual steps are reported, not changed. Without `--install`, doctor installs nothing.
 
@@ -232,10 +246,10 @@ class_result_evidence(suite: dict, source: Path, started_at: int | None = None, 
 validate_class_result_evidence(result: dict, suite: dict) -> None
 ```
 
-`aepm.toolchains` provides `validate_tool(value, path) -> dict`, `merge_toolchains(manifests, targets=None) -> list[dict]` and `probe_version(output) -> tuple | None`; `aepm.doctor.doctor(recipe, version, store, answers, *, install=False, host=None, which, runner, installer, announce) -> dict` accepts replacement lookup, probe and installer functions.
+`clod.toolchains` provides `validate_tool(value, path) -> dict`, `merge_toolchains(manifests, targets=None) -> list[dict]` and `probe_version(output) -> tuple | None`; `clod.doctor.doctor(recipe, version, store, answers, *, install=False, host=None, which, runner, installer, announce) -> dict` accepts replacement lookup, probe and installer functions.
 
-`aepm.foundations` owns these helpers. `aepm.recipe.fit(reference, package, authority, targets=None)` returns fit failure reasons; `authority` is a package containing the authoritative class bytes, independent of a preferred implementation.
+`clod.foundations` owns these helpers. `clod.recipe.fit(reference, package, authority, targets=None)` returns fit failure reasons; `authority` is a package containing the authoritative class bytes, independent of a preferred implementation.
 
 `module_sources` and `source_for_module` map manifest artefacts to packaged source; `slot` remaps `components/<package name>/` to `components/<slot>/`. An unknown installed module is an error.
 
-`aepm.trust.publish_review(store: Path, ref: PackageRef, report: dict, private_key: Path, *, policy: Path) -> dict` validates the complete report and its retained evidence before guardian signing. Each class result carries `classEvidence: {reference, inventoryDigest, startedAt, completedAt}`: the class reference, the SHA-256 of the canonical class inventory the suite ran, and Unix timestamps from execution. The record has the same size whatever the inventory holds. The inventory bytes are the package archive's own files: every report binds its archives through `packages` and the suite declarations through `suiteSetDigest`, archives are checked against the inventory when read, staged suite files are checked before their result is recorded, and an installed application's retained package files are checked for exact membership and digests before any report is accepted. `maintenance_facts` validates the signed guardian and report, and returns `package`, `maintenance`, `platforms`, `lastSuccessfulVerification`, `reportDigest`, and `reviewSignedAt`. The successful verification time comes from execution evidence; a report without timed execution returns null.
+`clod.trust.publish_review(store: Path, ref: PackageRef, report: dict, private_key: Path, *, policy: Path) -> dict` validates the complete report and its retained evidence before guardian signing. Each class result carries `classEvidence: {reference, inventoryDigest, startedAt, completedAt}`: the class reference, the SHA-256 of the canonical class inventory the suite ran, and Unix timestamps from execution. The record has the same size whatever the inventory holds. The inventory bytes are the package archive's own files: every report binds its archives through `packages` and the suite declarations through `suiteSetDigest`, archives are checked against the inventory when read, staged suite files are checked before their result is recorded, and an installed application's retained package files are checked for exact membership and digests before any report is accepted. `maintenance_facts` validates the signed guardian and report, and returns `package`, `maintenance`, `platforms`, `lastSuccessfulVerification`, `reportDigest`, and `reviewSignedAt`. The successful verification time comes from execution evidence; a report without timed execution returns null.

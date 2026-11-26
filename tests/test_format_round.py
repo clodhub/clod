@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from aepm.model import AepmError, canonical, digest, package_version, validate_component, version_key
+from clod.model import ClodError, canonical, digest, package_version, validate_component, version_key
 from tests.core.test_core import CLASS_FIELDS, fixture, png
 
 
@@ -48,7 +48,7 @@ class Base(unittest.TestCase):
         self.manifest = fixture(self.root / "source")
 
     def refused(self, code, manifest=None):
-        with self.assertRaises(AepmError) as raised:
+        with self.assertRaises(ClodError) as raised:
             validate_component(manifest if manifest is not None else self.manifest)
         self.assertEqual(raised.exception.code, code)
 
@@ -83,19 +83,19 @@ class ReleaseTests(Base):
 
     def test_advisory_ids_and_channels_are_checked(self):
         for fixes in (["ghsa-lower-case"], ["CVE"], ["GHSA-" + "x" * 60], ["CVE-2026-1", "CVE-2026-1"]):
-            with self.subTest(fixes=fixes), self.assertRaises(AepmError):
+            with self.subTest(fixes=fixes), self.assertRaises(ClodError):
                 validate_component(self.at("1.0.1", "security", fixes))
         for value in ({"channel": "stable", "fixes": []}, {"channel": "features"}, None):
             manifest = copy.deepcopy(self.manifest)
             manifest["release"] = value
-            with self.subTest(value=value), self.assertRaises(AepmError):
+            with self.subTest(value=value), self.assertRaises(ClodError):
                 validate_component(manifest)
 
     def test_preview_versions_and_their_order(self):
         for number in ("1.0.0-preview.1", "0.9.0-preview.12"):
             package_version(number, "version")
         for number in ("1.0.0-preview.0", "1.0.0-beta.1", "1.0.0-preview", "1.0.0+build.1", "1.0.0-preview.01", "01.0.0"):
-            with self.subTest(number=number), self.assertRaises(AepmError):
+            with self.subTest(number=number), self.assertRaises(ClodError):
                 package_version(number, "version")
         ordered = ["0.9.0", "1.0.0-preview.1", "1.0.0-preview.2", "1.0.0-preview.10", "1.0.0", "1.0.1", "1.1.0-preview.1"]
         self.assertEqual(sorted(reversed(ordered), key=version_key), ordered)
@@ -103,11 +103,11 @@ class ReleaseTests(Base):
     def test_class_and_interface_versions_have_no_preview(self):
         self.refused("invalid-version", self.with_class(self.manifest, version="1.0.0-preview.1"))
         manifest = copy.deepcopy(self.manifest)
-        manifest["provides"] = [{"id": "port", "type": "port", "version": "1.0.0-preview.1", "path": "interface.txt"}]
+        manifest["provides"] = [{"id": "port", "type": "com.clodhub/port", "version": "1.0.0-preview.1", "path": "interface.txt"}]
         self.refused("invalid-version", manifest)
 
     def test_earlier_manifest_formats_and_upgrade_policy_are_refused(self):
-        for number in (1, 2):
+        for number in (1, 2, 3):
             manifest = copy.deepcopy(self.manifest)
             manifest["format"] = number
             with self.subTest(format=number):
@@ -126,14 +126,14 @@ class WaiverTests(Base):
         for waivers in ([{"id": "GHSA-abcd", "reason": ""}], [{"id": "not an id", "reason": "x"}], [{"id": "CVE-2026-1"}],
                         [{"id": "CVE-2026-1", "reason": "a"}, {"id": "CVE-2026-1", "reason": "b"}], None):
             manifest["vulnerabilityWaivers"] = waivers
-            with self.subTest(waivers=waivers), self.assertRaises(AepmError):
+            with self.subTest(waivers=waivers), self.assertRaises(ClodError):
                 validate_component(manifest)
 
 
 class ImageTests(Base):
     def packed(self, manifest, files):
-        """Pack a copy of the fixture with these image files; the AepmError code, or None when it packs."""
-        from aepm.bundle import pack
+        """Pack a copy of the fixture with these image files; the ClodError code, or None when it packs."""
+        from clod.bundle import pack
         source = self.root / ("source-" + digest(canonical(manifest))[:8])
         fixture(source)
         for path, data in files.items():
@@ -144,7 +144,7 @@ class ImageTests(Base):
         (source / "component.json").write_bytes(canonical(manifest))
         try:
             pack(source, self.root / "store")
-        except AepmError as error:
+        except ClodError as error:
             return error.code
         return None
 
@@ -152,7 +152,7 @@ class ImageTests(Base):
         return {"path": path, "caption": "The example", "platform": "web", "width": width, "height": height, **changes}
 
     def test_png_and_webp_sizes_are_read_from_their_headers(self):
-        from aepm.images import image_size
+        from clod.images import image_size
         self.assertEqual(image_size(png(7, 5), "a.png"), ("png", 7, 5))
         self.assertEqual(image_size(vp8(640, 480), "a.webp"), ("webp", 640, 480))
         self.assertEqual(image_size(vp8l(1280, 800), "a.webp"), ("webp", 1280, 800))
@@ -174,7 +174,7 @@ class ImageTests(Base):
                            ("vp8x without image data", vp8x(8, 8, chunk(b"ALPH", b"\x00" * 5))),
                            ("vp8x size disagrees", vp8x(8, 8, chunk(b"VP8 ", vp8_body(9, 8)))),
                            ("vp8x animation", vp8x(8, 8, chunk(b"ANIM", b"\x00" * 6), chunk(b"VP8 ", vp8_body(8, 8))))):
-            with self.subTest(name=name), self.assertRaises(AepmError):
+            with self.subTest(name=name), self.assertRaises(ClodError):
                 image_size(data, "image")
 
     def test_listed_images_must_match_their_files(self):
@@ -211,6 +211,7 @@ class ImageTests(Base):
         validate_component(manifest)
         self.refused("images-required", self.with_class(manifest, presentation="visual"))
         recipe = dict(copy.deepcopy(manifest), kind="recipe", implements=[])
+        recipe["identity"]["name"] = "pkg:clod/com.clodhub/sample-recipe"
         recipe["artefacts"] = []
         self.refused("images-required", recipe)
         recipe.update(platforms=["server"], toolchains={"server": []})
@@ -223,25 +224,26 @@ class ClassTests(Base):
                                            title="Card graphics", summary="Card faces and backs"))
         for change in ({"category": "Games/Cards"}, {"category": "games//cards"}, {"category": ""}, {"presentation": "hidden"},
                        {"title": ""}, {"summary": "x" * 501}):
-            with self.subTest(change=change), self.assertRaises(AepmError):
+            with self.subTest(change=change), self.assertRaises(ClodError):
                 validate_component(self.with_class(self.manifest, **change))
         descriptor = dict(self.manifest["classes"][0]["descriptor"])
         del descriptor["presentation"]
-        from aepm.foundations import validate_class_descriptor
-        with self.assertRaises(AepmError):
+        from clod.foundations import validate_class_descriptor
+        with self.assertRaises(ClodError):
             validate_class_descriptor(descriptor)
 
     def test_earlier_class_format_is_refused(self):
-        from aepm.foundations import validate_class_descriptor
+        from clod.foundations import validate_class_descriptor
         descriptor = {key: value for key, value in self.manifest["classes"][0]["descriptor"].items()
                       if key not in ("title", "summary", "category", "presentation")}
-        descriptor["format"] = 1
-        with self.assertRaises(AepmError) as raised:
-            validate_class_descriptor(descriptor)
-        self.assertEqual(raised.exception.code, "class-format-outdated")
+        for number in (1, 2):
+            descriptor["format"] = number
+            with self.subTest(format=number), self.assertRaises(ClodError) as raised:
+                validate_class_descriptor(descriptor)
+            self.assertEqual(raised.exception.code, "class-format-outdated")
 
     def test_category_tree(self):
-        from aepm.foundations import validate_categories
+        from clod.foundations import validate_categories
 
         def tree(*entries):
             return {"format": 1, "categories": [{"id": item, "title": item.title(), "parent": parent} for item, parent in entries]}
@@ -260,22 +262,23 @@ class ClassTests(Base):
                 ("invalid-category", tree(("Games", None)), ()),
                 ("invalid-format", {"format": 2, "categories": []}, ()),
                 ("expected-object", [], ())):
-            with self.subTest(code=code, document=document), self.assertRaises(AepmError) as raised:
+            with self.subTest(code=code, document=document), self.assertRaises(ClodError) as raised:
                 validate_categories(document, classes)
             self.assertEqual(raised.exception.code, code)
 
 
 class RecipeDocumentTests(unittest.TestCase):
     def test_recipe_format_and_question_rules(self):
-        from aepm.recipe import validate_recipe_document
-        good = {"format": 2, "questions": [
+        from clod.recipe import validate_recipe_document
+        good = {"format": 3, "questions": [
             {"id": "targets", "question": "Which devices?", "ask": "unless-settled", "default": ["web"]},
             {"id": "key", "question": "Which key?", "ask": "required"},
             {"id": "scale", "question": "How many?", "ask": "default", "default": "small"}]}
         validate_recipe_document(good)
-        with self.assertRaises(AepmError) as raised:
-            validate_recipe_document({**good, "format": 1})
-        self.assertEqual(raised.exception.code, "recipe-format-outdated")
+        for number in (1, 2):
+            with self.subTest(format=number), self.assertRaises(ClodError) as raised:
+                validate_recipe_document({**good, "format": number})
+            self.assertEqual(raised.exception.code, "recipe-format-outdated")
         for code, question in (("question-default", {"id": "a", "question": "A?", "ask": "required", "default": 1}),
                                ("question-default", {"id": "a", "question": "A?", "ask": "default"}),
                                ("question-default", {"id": "a", "question": "A?", "ask": "unless-settled"}),
@@ -283,11 +286,11 @@ class RecipeDocumentTests(unittest.TestCase):
                                ("invalid-value", {"id": "a", "question": "A?", "default": 1}),
                                ("expected-string", {"id": "a", "ask": "default", "default": 1}),
                                ("expected-string", {"id": "a", "question": " ", "ask": "default", "default": 1})):
-            with self.subTest(question=question), self.assertRaises(AepmError) as raised:
-                validate_recipe_document({"format": 2, "questions": [question]})
+            with self.subTest(question=question), self.assertRaises(ClodError) as raised:
+                validate_recipe_document({"format": 3, "questions": [question]})
             self.assertEqual(raised.exception.code, code)
-        for document in ({"format": 3, "questions": []}, {"questions": []}, {"format": 2}):
-            with self.subTest(document=document), self.assertRaises(AepmError) as raised:
+        for document in ({"format": 4, "questions": []}, {"questions": []}, {"format": 3}):
+            with self.subTest(document=document), self.assertRaises(ClodError) as raised:
                 validate_recipe_document(document)
             self.assertEqual(raised.exception.code, "recipe-format")
 
@@ -295,22 +298,22 @@ class RecipeDocumentTests(unittest.TestCase):
 class PurlTests(unittest.TestCase):
     """The package URL rule the catalogue applies (shared/src/foundations.ts parsePurl)."""
 
-    CORPUS_SHA256 = "84e429d012f0931f6db2e67f2e4d2f61b76fab24b7a23a4e2ec6ea688563b470"
+    CORPUS_SHA256 = "c3943eda2a8175f40f9021fed195c2cbb12ca9bd8e2837742342c6bbc65b5601"
 
     def test_the_shared_corpus(self):
         import hashlib
         import json
-        from aepm.foundations import parse_purl
+        from clod.foundations import parse_purl
         raw = (Path(__file__).parent / "fixtures/purl-cases.json").read_bytes()
         self.assertEqual(hashlib.sha256(raw).hexdigest(), self.CORPUS_SHA256)
         cases = json.loads(raw)
-        self.assertEqual((len(cases), sum(case["accept"] for case in cases)), (2069, 1905))
+        self.assertEqual((len(cases), sum(case["accept"] for case in cases)), (2076, 1909))
         wrong = [case["purl"] for case in cases if (parse_purl(case["purl"]) if case["accept"] else None) != (case.get("parts") if case["accept"] else None)
                  or (parse_purl(case["purl"]) is None) == case["accept"]]
         self.assertEqual(wrong, [])
 
     def test_package_urls_follow_the_specification(self):
-        from aepm.foundations import _purl, parse_purl
+        from clod.foundations import _purl, parse_purl
         for value in ("pkg:npm/left-pad@1.3.0", "pkg:npm/%40angular/core@17.0.0", "pkg:npm/@angular/core@17.0.0",
                       "pkg:maven/org.example/lib@1.0", "pkg:swift/github.com/vapor/vapor@4.0.0", "pkg:golang/golang.org/x/net@0.1.0",
                       "pkg:pypi/requests@2.31.0", "pkg:cargo/serde@1.0.0", "pkg:generic/lib@1.0"):
@@ -323,44 +326,95 @@ class PurlTests(unittest.TestCase):
                       "pkg:npm/a//b@1.0", "pkg:npm/left pad@1.0", "pkg:npm/%E0%A4%A@1.0", "pkg:npm/a/b/c@1.0"):
             with self.subTest(value=value):
                 self.assertIsNone(parse_purl(value))
-                with self.assertRaisesRegex(AepmError, "invalid-purl"):
+                with self.assertRaisesRegex(ClodError, "invalid-purl"):
                     _purl(value, "upstream.purl", "1.0")
         _purl("pkg:swift/github.com/livekit/client-sdk-swift@2.19.0", "upstream.purl", "2.19.0")
-        with self.assertRaisesRegex(AepmError, "upstream-purl"):
+        with self.assertRaisesRegex(ClodError, "upstream-purl"):
             _purl("pkg:npm/left-pad@1.3.0", "upstream.purl", "1.3.1")
+
+
+class PackageNameTests(unittest.TestCase):
+    """Package names, versioned references and interface types by papers/package-urls.md, as the catalogue applies them
+    (shared/src/names.ts)."""
+
+    CORPUS_SHA256 = "968b567c05252f10fe2bfe6b727af8a93e8c6f9283abc3bf13ee65ea9d83723c"
+
+    def test_the_shared_corpus(self):
+        import hashlib
+        import json
+        from clod.model import parse_interface, parse_package
+        raw = (Path(__file__).parent / "fixtures/package-name-cases.json").read_bytes()
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), self.CORPUS_SHA256)
+        cases = json.loads(raw)
+        self.assertEqual((len(cases), sum(case["accept"] for case in cases)), (100, 28))
+        parsers = {"package": parse_package, "reference": lambda value: parse_package(value, True), "interface": parse_interface}
+        wrong = [(case["what"], case["value"]) for case in cases if parsers[case["what"]](case["value"]) != case.get("parts")]
+        self.assertEqual(wrong, [])
+
+    def test_validators_follow_the_corpus(self):
+        import json
+        from clod.io import package_name
+        from clod.model import interface_type, name
+        for case in json.loads((Path(__file__).parent / "fixtures/package-name-cases.json").read_bytes()):
+            check = {"package": lambda value: (name(value, "name"), package_name(value)),
+                     "interface": lambda value: interface_type(value, "type")}.get(case["what"])
+            if check is None:
+                continue
+            with self.subTest(case=case["value"]):
+                if case["accept"]:
+                    check(case["value"])
+                else:
+                    with self.assertRaises(ClodError):
+                        check(case["value"])
+
+    def test_kinds_and_short_forms(self):
+        from clod.__main__ import identity
+        from clod.model import name, package_id
+        self.assertEqual(identity("presence@0.11.0"), ("pkg:clod/com.clodhub/presence", "0.11.0"))
+        self.assertEqual(identity("io.github.someone/thing@1.0.0-preview.1"), ("pkg:clod/io.github.someone/thing", "1.0.0-preview.1"))
+        self.assertEqual(identity("pkg:clod/com.clodhub/ourpoker-recipe@0.13.0"), ("pkg:clod/com.clodhub/ourpoker-recipe", "0.13.0"))
+        for value in ("clodhub/presence@0.11.0", "presence", "Presence@1.0.0", "presence@v1.0.0", "pkg:clod/presence@1.0.0"):
+            with self.subTest(value=value), self.assertRaises(ClodError):
+                identity(value)
+        name("pkg:clod/com.clodhub/presence-class", "name", "class")
+        with self.assertRaises(ClodError):
+            name("pkg:clod/com.clodhub/presence", "name", "class")
+        self.assertEqual(package_id("pkg:clod/com.clodhub/ourpoker-recipe"), "com.clodhub.ourpoker-recipe")
 
 
 class PolicyTests(unittest.TestCase):
     def test_update_policy_and_earlier_definitions(self):
-        from aepm.application import DEFAULT_POLICY, parse_update_policy, validate_definition
-        definition = {"format": 2, "id": "app", "title": "App", "recipe": {"name": "clodhub/recipe", "version": "1.0.0-preview.1"},
+        from clod.application import DEFAULT_POLICY, parse_update_policy, validate_definition
+        definition = {"format": 3, "id": "app", "title": "App", "recipe": {"name": "pkg:clod/com.clodhub/sample-recipe", "version": "1.0.0-preview.1"},
                       "components": [], "configuration": {}, "design": {"definitions": [], "instances": [], "connections": []},
                       "updatePolicy": dict(DEFAULT_POLICY)}
         validate_definition(definition)
         self.assertEqual(DEFAULT_POLICY, {"security": "auto", "features": "manual", "preview": "hold"})
         for policy in ("patch", {"security": "auto", "features": "manual"}, {**DEFAULT_POLICY, "preview": "never"}):
-            with self.subTest(policy=policy), self.assertRaises(AepmError):
+            with self.subTest(policy=policy), self.assertRaises(ClodError):
                 validate_definition({**definition, "updatePolicy": policy})
-        with self.assertRaises(AepmError) as raised:
-            validate_definition({**definition, "format": 1, "updatePolicy": "patch"})
-        self.assertEqual(raised.exception.code, "definition-format-outdated")
+        for number in (1, 2):
+            with self.subTest(format=number), self.assertRaises(ClodError) as raised:
+                validate_definition({**definition, "format": number, "updatePolicy": "patch"})
+            self.assertEqual(raised.exception.code, "definition-format-outdated")
         self.assertEqual(parse_update_policy("preview=manual,security=manual"), {"security": "manual", "features": "manual", "preview": "manual"})
         for text in ("preview", "nightly=auto", "security=sometimes"):
-            with self.subTest(text=text), self.assertRaises(AepmError):
+            with self.subTest(text=text), self.assertRaises(ClodError):
                 parse_update_policy(text)
 
     def test_earlier_proposal_format_is_refused(self):
-        from aepm.update import proposal_context
-        from aepm.io import write
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "proposal.json"
-            write(path, {"format": 1, "stage": "/x/.app.aepm-transaction/stage", "changes": []})
-            with self.assertRaises(AepmError) as raised:
-                proposal_context(path)
-        self.assertEqual(raised.exception.code, "proposal-format-outdated")
+        from clod.update import proposal_context
+        from clod.io import write
+        for number in (1, 2):
+            with tempfile.TemporaryDirectory() as directory, self.subTest(format=number):
+                path = Path(directory) / "proposal.json"
+                write(path, {"format": number, "stage": "/x/.app.clod-transaction/stage", "changes": []})
+                with self.assertRaises(ClodError) as raised:
+                    proposal_context(path)
+                self.assertEqual(raised.exception.code, "proposal-format-outdated")
 
     def test_channel_offers(self):
-        from aepm.channels import newest
+        from clod.channels import newest
         versions = ["1.0.0", "1.0.1", "1.0.2", "1.1.0-preview.1", "1.1.0", "1.1.1", "2.0.0-preview.1"]
         self.assertEqual(newest("1.0.0", versions, "security"), "1.0.2")
         self.assertEqual(newest("1.0.2", versions, "security"), None)

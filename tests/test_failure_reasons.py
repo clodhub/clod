@@ -7,10 +7,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from aepm import contextual
-from aepm.environment import Execution
-from aepm.io import load
-from aepm.verification import summary
+from clod import contextual
+from clod.environment import Execution
+from clod.io import load
+from clod.verification import summary
 from tests.core.test_core import PYTHON
 
 
@@ -36,7 +36,7 @@ class FailureReasonTests(unittest.TestCase):
         for event in events:
             if event["step"] == "retained-private-root":
                 retained = Path(event["path"])
-                self.assertTrue(retained.name.startswith("aepm-context-"))
+                self.assertTrue(retained.name.startswith("clod-context-"))
                 self.addCleanup(shutil.rmtree, retained)
         return result, evidence, events
 
@@ -82,7 +82,7 @@ class FailureReasonTests(unittest.TestCase):
                     if "--version" in argv:
                         return actual(argv, *args, **kwargs)
                     return 1, 0, error, b""
-                with patch("aepm.contextual.run", controlled):
+                with patch("clod.contextual.run", controlled):
                     result, _, events = self.execute(self.suite)
                 self.assertEqual((result["status"], result["reason"]), ("failed", error))
                 self.assertEqual(next(event["reason"] for event in events if type(event["step"]) is int), error)

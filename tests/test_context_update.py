@@ -5,16 +5,16 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from aepm.application import assemble, requirements
-from aepm.authorization import execution_request, authorize_execution
-from aepm.bundle import pack, read_package, resolve
-from aepm.environment import clock, path_platform
-from aepm.io import load, snapshot, write
-from aepm.model import AepmError, canonical, digest
-from aepm.test_identities import generate
-from aepm.trust import EXECUTION_AUTHORIZATION, publish_release, publish_review, verify, verify_package
-from aepm.update import propose, approve, apply
-from aepm.verification import review_package
+from clod.application import assemble, requirements
+from clod.authorization import execution_request, authorize_execution
+from clod.bundle import pack, read_package, resolve
+from clod.environment import clock, path_platform
+from clod.io import load, snapshot, write
+from clod.model import ClodError, canonical, digest
+from clod.test_identities import generate
+from clod.trust import EXECUTION_AUTHORIZATION, publish_release, publish_review, verify, verify_package
+from clod.update import propose, approve, apply
+from clod.verification import review_package
 from tests.core.test_core import PYTHON
 from tests.test_application import source
 from tests.test_execution_context import SCRIPT
@@ -28,11 +28,11 @@ class ContextUpdateTests(unittest.TestCase):
             policy_path = generate(root / "keys")
             policy = load(policy_path)
             refs = []
-            for name, version, recipe in (("sample", "0.1.0", False), ("sample", "0.1.1", False), ("recipe", "0.1.0", True)):
+            for name, version, recipe in (("sample", "0.1.0", False), ("sample", "0.1.1", False), ("sample-recipe", "0.1.0", True)):
                 directory = root / (name + version)
                 manifest = source(directory, name, version, recipe)
                 if recipe:
-                    manifest["format"] = 3
+                    manifest["format"] = 4
                     for suite in manifest["verification"]:
                         suite["execution"] = {"kind": "local", "simulation": False, "operations": [], "settings": [], "secrets": [],
                                               "resources": [], "assertions": [], "cleanup": None}
@@ -61,8 +61,8 @@ class ContextUpdateTests(unittest.TestCase):
                 self.assertEqual(report["summary"]["required-local"], "passed", report)
                 publish_review(store, ref, report, root / "keys/guardian.pem", policy=policy_path)
                 verify_package(ref, store, policy_path)
-            definition = {"format": 2, "id": "context-app", "title": "Context App", "recipe": {"name": "clodhub/recipe", "version": "0.1.0"},
-                          "components": [{"id": "sample", "name": "clodhub/sample", "version": "0.1.0", "configuration": {}}],
+            definition = {"format": 3, "id": "context-app", "title": "Context App", "recipe": {"name": "pkg:clod/com.clodhub/sample-recipe", "version": "0.1.0"},
+                          "components": [{"id": "sample", "name": "pkg:clod/com.clodhub/sample", "version": "0.1.0", "configuration": {}}],
                           "configuration": {}, "design": {"definitions": [], "instances": [], "connections": []}, "updatePolicy": {"security": "auto", "features": "manual", "preview": "hold"}}
             lock = resolve(requirements(definition), store / "catalogue.json", definition["id"], digest(canonical(definition)))
             app = root / "application"
@@ -86,10 +86,10 @@ class ContextUpdateTests(unittest.TestCase):
             approval = approve(proposal_path, root / "keys/owner.pem", policy_path)
             before = snapshot(app)
             expires = verify(authorization.read_bytes(), "owner", policy_path, EXECUTION_AUTHORIZATION)[0]["predicate"]["expiresAt"]
-            with patch("aepm.trust.time.time", return_value=expires), self.assertRaises(AepmError):
+            with patch("clod.trust.time.time", return_value=expires), self.assertRaises(ClodError):
                 apply(app, proposal_path, approval, policy_path)
             self.assertEqual(snapshot(app), before)
-            with self.assertRaisesRegex(AepmError, "statement-role"):
+            with self.assertRaisesRegex(ClodError, "statement-role"):
                 apply(app, proposal_path, authorization, policy_path)
             result = apply(app, proposal_path, approval, policy_path)
             self.assertEqual(result["lock"], lock)

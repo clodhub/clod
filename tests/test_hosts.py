@@ -11,15 +11,15 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from aepm.__main__ import main
-from aepm.bundle import pack, read_package
-from aepm.io import linked, rooted, snapshot, write
-from aepm.model import AepmError
+from clod.__main__ import main
+from clod.bundle import pack, read_package
+from clod.io import linked, rooted, snapshot, write
+from clod.model import ClodError
 from tests.core.test_core import fixture
 
 # The archive digest of tests.core.test_core.fixture(); identical on macOS, Linux and Windows.
-FIXTURE_DIGEST = "c6999fa07d6d8b9d8d5811af948216779fee0f1d7b526cae9b1d4a6fd758c813"
-DEFINITION = {"format": 2, "id": "sample-app", "title": "Sample", "recipe": {"name": "clodhub/recipe", "version": "0.1.0"},
+FIXTURE_DIGEST = "efe43fe4c00c5897f6f44f4a5f5e8105787d8129ba41e5ad3981d03ba6906869"
+DEFINITION = {"format": 3, "id": "sample-app", "title": "Sample", "recipe": {"name": "pkg:clod/com.clodhub/sample-recipe", "version": "0.1.0"},
               "components": [], "configuration": {}, "design": {"definitions": [], "instances": [], "connections": []}, "updatePolicy": {"security": "auto", "features": "manual", "preview": "hold"}}
 
 
@@ -38,7 +38,7 @@ class HostTests(unittest.TestCase):
     def test_archive_bytes_do_not_depend_on_host_or_source_location(self):
         fixture(self.root / "source", python="python3")
         self.assertEqual(pack(self.root / "source", self.root / "store")["digest"], FIXTURE_DIGEST)
-        manifest, _ = read_package({"name": "clodhub/sample", "version": "0.1.0", "digest": FIXTURE_DIGEST}, self.root / "store")
+        manifest, _ = read_package({"name": "pkg:clod/com.clodhub/sample", "version": "0.1.0", "digest": FIXTURE_DIGEST}, self.root / "store")
         self.assertEqual([item["path"] for item in manifest["files"] if item["executable"]], ["run.sh"])
 
     @unittest.skipUnless(os.name == "nt", "Windows has no execute bits; POSIX packing compares them with the manifest")
@@ -56,11 +56,11 @@ class HostTests(unittest.TestCase):
         (self.root / "tree/inner").mkdir(parents=True)
         real = os.lstat
         target = str(self.root / "tree/inner")
-        with patch("aepm.io.os.lstat", lambda path, *a, **k: Reparse() if str(path) == target else real(path, *a, **k)):
+        with patch("clod.io.os.lstat", lambda path, *a, **k: Reparse() if str(path) == target else real(path, *a, **k)):
             self.assertTrue(linked(target))
-            with self.assertRaisesRegex(AepmError, "special-file"):
+            with self.assertRaisesRegex(ClodError, "special-file"):
                 snapshot(self.root / "tree")
-            with self.assertRaisesRegex(AepmError, "symlink"):
+            with self.assertRaisesRegex(ClodError, "symlink"):
                 rooted(self.root / "tree", "inner/file")
         self.assertFalse(linked(target))
         self.assertFalse(linked(self.root / "absent"))
@@ -73,15 +73,15 @@ class HostTests(unittest.TestCase):
         subprocess.run(["cmd", "/c", "mklink", "/J", str(self.root / "source/linked"), str(self.root / "outside")], check=True,
                        capture_output=True)
         self.assertTrue(linked(self.root / "source/linked"))
-        with self.assertRaisesRegex(AepmError, "special-file"):
+        with self.assertRaisesRegex(ClodError, "special-file"):
             snapshot(self.root / "source")
-        with self.assertRaisesRegex(AepmError, "symlink"):
+        with self.assertRaisesRegex(ClodError, "symlink"):
             rooted(self.root / "source", "linked/secret")
         component = json.loads((self.root / "source/component.json").read_text())
         component["files"].append({"path": "linked/secret", "executable": False})
         component["files"].sort(key=lambda item: item["path"])
         write(self.root / "source/component.json", component)
-        with self.assertRaisesRegex(AepmError, "unsafe-file"):
+        with self.assertRaisesRegex(ClodError, "unsafe-file"):
             pack(self.root / "source", self.root / "store")
 
     def test_update_without_trusted_names_what_trusted_permits(self):

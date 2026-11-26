@@ -1,1 +1,1 @@
-{"id":"clodhub.counter","name":"Counter","kind":"component","status":"example","package":"clodhub/counter","version":"1.0.0","ports":[{"id":"counter","name":"Counter","direction":"output","kind":"interface","type":"counter","version":"1.0.0"}],"settings":[]}
+{"id":"com.clodhub.counter","name":"Counter","kind":"component","status":"example","package":"pkg:clod/com.clodhub/counter","version":"1.0.0","ports":[{"id":"counter","name":"Counter","direction":"output","kind":"interface","type":"com.clodhub/counter","version":"1.0.0"}],"settings":[]}

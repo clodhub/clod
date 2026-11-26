@@ -10,29 +10,29 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from aepm.__main__ import main
-from aepm.authorization import execution_request, authorize_execution
-from aepm.bundle import pack, read_package
-from aepm.environment import clock, describe_resource
-from aepm.environment import path_platform
-from aepm.io import load, write
-from aepm.model import AepmError, canonical, digest
-from aepm.test_identities import generate
-from aepm.trust import publish_release, publish_review, review_bindings, sign, validate_report_evidence
-from aepm.verification import review_package
+from clod.__main__ import main
+from clod.authorization import execution_request, authorize_execution
+from clod.bundle import pack, read_package
+from clod.environment import clock, describe_resource
+from clod.environment import path_platform
+from clod.io import load, write
+from clod.model import ClodError, canonical, digest
+from clod.test_identities import generate
+from clod.trust import publish_release, publish_review, review_bindings, sign, validate_report_evidence
+from clod.verification import review_package
 from tests.core.test_core import PYTHON, fixture
 
 
 BUILD = '''import hashlib,json,os,py_compile
 from pathlib import Path
-c=json.loads(Path(os.environ['AEPM_CONTEXT_FILE']).read_text())
+c=json.loads(Path(os.environ['CLOD_CONTEXT_FILE']).read_text())
 assert c['operations']==['native-build'] and not c['resources']
 py_compile.compile('test.py', cfile='built.pyc', doraise=True)
 result={'format':1,'runId':c['runId'],'package':c['package'],'id':c['id'],
  'assertions':[{'id':'build-produced','passed':True,'actual':True}],
  'artifacts':[{'path':'built.pyc','digest':hashlib.sha256(Path('built.pyc').read_bytes()).hexdigest(),'architecture':None}],
  'resources':[],'cleanup':{'required':False,'attempted':False,'completed':True,'reason':''}}
-Path(os.environ['AEPM_RESULT_FILE']).write_text(json.dumps(result,sort_keys=True,separators=(',',':')))
+Path(os.environ['CLOD_RESULT_FILE']).write_text(json.dumps(result,sort_keys=True,separators=(',',':')))
 '''
 
 
@@ -44,7 +44,7 @@ class SuiteSelectionTests(unittest.TestCase):
         self.policy = generate(self.root / "keys")
         source = self.root / "source"
         manifest = fixture(source)
-        manifest["format"] = 3
+        manifest["format"] = 4
         unit = manifest["verification"][0]
         unit["execution"] = dict(kind="local", simulation=False, operations=[], settings=[], secrets=[], resources=[], assertions=[], cleanup=None)
         build = deepcopy(unit)
@@ -104,14 +104,14 @@ class SuiteSelectionTests(unittest.TestCase):
         self.assertEqual(request["suites"][0]["operations"], ["native-build"])
         self.assertEqual(load(Path(str(self.request) + ".evidence/selection.json")), {"format": 1, "suites": self.pairs("build")})
         authorize_execution(self.request, self.root / "keys/owner.pem", self.policy, self.authorization)
-        from aepm import contextual
+        from clod import contextual
         actual_probe = contextual.prerequisites
 
         def probe(suite, *args, **kwargs):
             self.assertNotEqual(suite["id"], "runtime", "Unselected runtime reached its probe")
             return actual_probe(suite, *args, **kwargs)
 
-        with patch("aepm.contextual.prerequisites", probe):
+        with patch("clod.contextual.prerequisites", probe):
             report = review_package(self.ref, self.store, self.policy, True, execution_context=self.context,
                                     authorization=self.authorization, execution_state=self.state)
         results = {suite["id"]: suite for suite in report["suites"]}
@@ -126,7 +126,7 @@ class SuiteSelectionTests(unittest.TestCase):
     def test_invalid_selections_create_no_outputs_or_registry(self):
         for selection in ([], self.pairs("build", "build"), self.pairs("unknown"), self.pairs("unit"), self.pairs("provider"),
                           [dict(package="not-a-digest", id="build")]):
-            with self.subTest(selection=selection), self.assertRaises(AepmError):
+            with self.subTest(selection=selection), self.assertRaises(ClodError):
                 self.request_authority(selection)
             self.assertFalse(self.request.exists())
             self.assertFalse(Path(str(self.request) + ".evidence").exists())
@@ -143,7 +143,7 @@ class SuiteSelectionTests(unittest.TestCase):
             write(selection_path, {"format": 1, "suites": self.pairs("build")})
             write(self.request, original)
             mutation()
-            with self.assertRaises(AepmError):
+            with self.assertRaises(ClodError):
                 authorize_execution(self.request, self.root / "keys/owner.pem", self.policy, self.authorization)
             self.assertFalse(self.authorization.exists())
 

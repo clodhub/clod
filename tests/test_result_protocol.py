@@ -5,9 +5,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from aepm.contextual import result_document
-from aepm.io import immutable_blob, write
-from aepm.model import AepmError
+from clod.contextual import result_document
+from clod.io import immutable_blob, write
+from clod.model import ClodError
 
 
 class ResultProtocolTests(unittest.TestCase):
@@ -32,7 +32,7 @@ class ResultProtocolTests(unittest.TestCase):
         for assertions in ([], self.result["assertions"] * 2,
                            [*self.result["assertions"], {"id": "unexpected", "passed": True, "actual": True}],
                            [{"id": "version-match", "passed": True, "actual": "PRIVATE_SENTINEL"}]):
-            with self.subTest(assertions=assertions), self.assertRaises(AepmError):
+            with self.subTest(assertions=assertions), self.assertRaises(ClodError):
                 self.check({**self.result, "assertions": assertions})
 
     def test_child_cannot_attest_its_own_termination(self):
@@ -40,7 +40,7 @@ class ResultProtocolTests(unittest.TestCase):
         self.result["assertions"] = [{"id": "process-tree-terminated", "passed": False, "actual": None}]
         self.check(self.result)
         self.result["assertions"][0].update(passed=True, actual=True)
-        with self.assertRaisesRegex(AepmError, "runner-owned-assertion"):
+        with self.assertRaisesRegex(ClodError, "runner-owned-assertion"):
             self.check(self.result)
 
     def test_artifact_escape_and_protocol_symlink_reject(self):
@@ -49,11 +49,11 @@ class ResultProtocolTests(unittest.TestCase):
         self.addCleanup(outside.unlink)
         value = deepcopy(self.result)
         value["artifacts"] = [{"path": "../" + outside.name, "digest": "0" * 64, "architecture": None}]
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             self.check(value)
         self.path.unlink()
         self.path.symlink_to(outside)
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             result_document(self.path, self.suite, "b" * 64, self.root, [])
 
     def test_immutable_logs_reject_existing_symlink_without_overwrite(self):
@@ -62,11 +62,11 @@ class ResultProtocolTests(unittest.TestCase):
         path = self.root / "logs/output.log"
         path.parent.mkdir()
         path.symlink_to(outside)
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             immutable_blob(path, b"new output")
         self.assertEqual(outside.read_bytes(), b"unchanged")
         path.unlink()
         immutable_blob(path, b"new output")
         immutable_blob(path, b"new output")
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             immutable_blob(path, b"different output")

@@ -9,9 +9,9 @@ import tarfile
 import tempfile
 import unittest
 
-from aepm.bundle import extract, extract_review, pack, read_package, resolve
-from aepm.model import AepmError, canonical, digest, loads, validate_component, validate_lock
-from aepm.trust import (RELEASE, REVIEW, release_statement, review_bindings, review_statement, sign, verify,
+from clod.bundle import extract, extract_review, pack, read_package, resolve
+from clod.model import ClodError, canonical, digest, loads, validate_component, validate_lock
+from clod.trust import (RELEASE, REVIEW, release_statement, review_bindings, review_statement, sign, verify,
                         verify_package)
 
 
@@ -19,7 +19,7 @@ from aepm.trust import (RELEASE, REVIEW, release_statement, review_bindings, rev
 PYTHON = "python" if os.name == "nt" else "python3"
 LOCAL = {"kind": "local", "simulation": False, "operations": [], "settings": [], "secrets": [], "resources": [],
          "assertions": [], "cleanup": None}
-CLASS_FIELDS = {"format": 2, "title": "Fixture class", "summary": "A class for tests", "category": "testing", "presentation": "none"}
+CLASS_FIELDS = {"format": 3, "title": "Fixture class", "summary": "A class for tests", "category": "testing", "presentation": "none"}
 
 
 def png(width=1, height=1):
@@ -40,7 +40,7 @@ def without_execution(suite):
 
 
 def local(suites):
-    """Checks as a format 3 manifest declares them: each with its local execution block."""
+    """Checks as a format 4 manifest declares them: each with its local execution block."""
     return [{**suite, "execution": copy.deepcopy(LOCAL)} for suite in suites]
 
 
@@ -51,12 +51,12 @@ def fixture(root, name="sample", version="0.1.0", dependencies=None, python=PYTH
                "visual.json": b"{}", "visual.svg": b"<svg/>", "visual.png": b"PNG",
                "description.txt": b"Connected example\n", "fixture.txt": b"fixture\n", "example.png": png(4, 3),
                 "test.py": b"assert 2 + 2 == 4\n", "run.sh": b"#!/bin/sh\nexit 0\n",
-                "class-check.py": b"import json, os\nfrom pathlib import Path\nm = json.loads(Path(os.environ['AEPM_CANDIDATE_MANIFEST']).read_text())\nassert m['identity']['name'].startswith('clodhub/')\nassert all(Path(p).is_file() for p in json.loads(os.environ['AEPM_MODULE_MAP']).values())\n"}
+                "class-check.py": b"import json, os\nfrom pathlib import Path\nm = json.loads(Path(os.environ['CLOD_CANDIDATE_MANIFEST']).read_text())\nassert m['identity']['name'].startswith('pkg:clod/com.clodhub/')\nassert all(Path(p).is_file() for p in json.loads(os.environ['CLOD_MODULE_MAP']).values())\n"}
     for path, data in content.items():
         (root / path).write_bytes(data)
         (root / path).chmod(0o755 if path == "run.sh" else 0o644)
-    c = {"format": 3, "kind": "component",
-         "identity": {"name": "clodhub/" + name, "version": version,
+    c = {"format": 4, "kind": "component",
+         "identity": {"name": "pkg:clod/com.clodhub/" + name, "version": version,
                       "sourceRevision": "test-revision", "sourceTreeDigest": "0" * 64,
                       "licence": "Apache-2.0"},
          "facilities": [{"id": "sample", "description": "Sample fixture"}],
@@ -81,7 +81,7 @@ def fixture(root, name="sample", version="0.1.0", dependencies=None, python=PYTH
          "upgrade": {"migration": "files-only"}, "release": {"channel": "features", "fixes": []},
          "images": [{"path": "example.png", "caption": "The fixture's example", "platform": "web", "width": 4, "height": 3}],
          "vulnerabilityWaivers": []}
-    descriptor = {**CLASS_FIELDS, "name": "clodhub/fixture-" + name, "version": "1.0.0", "provides": [], "requires": [],
+    descriptor = {**CLASS_FIELDS, "name": "pkg:clod/com.clodhub/fixture-" + name + "-class", "version": "1.0.0", "provides": [], "requires": [],
                   "settings": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
                   "inventory": [{"path": "class-check.py", "digest": digest(content["class-check.py"])}],
                   "verification": [{**copy.deepcopy(c["verification"][0]), "id": "behaviour", "argv": [python, "class-check.py"],
@@ -145,11 +145,11 @@ class CoreTests(unittest.TestCase):
                    "seconds": 0, "reason": "" if s["scope"] == "required-local" else "Tool unavailable",
                    "logDigest": digest(b""), "storage": {"writtenBytes": 0, "keptBytes": 0}, "locks": []}
                   for s in binding["suites"]]
-        from aepm.foundations import class_result_evidence
+        from clod.foundations import class_result_evidence
         for result, suite in zip(suites, binding["suites"]):
             if "class" in suite:
                 result["classEvidence"] = class_result_evidence(suite, self.source)
-        return {"format": 1, "context": "review",
+        return {"format": 3, "context": "review",
                 **{k: binding[k] for k in ("lockDigest", "assemblyDigest", "packages", "suiteSetDigest")},
                 "suites": suites, "summary": {"required-local": "passed", "platform": "blocked", "deployed": "not-applicable"}}
 
@@ -160,14 +160,14 @@ class CoreTests(unittest.TestCase):
         directory.mkdir(exist_ok=True)
         (directory / (digest(data) + ".json")).write_bytes(data)
         c, _ = read_package(ref, self.store)
-        statement = review_statement(ref, c["kind"], digest(data), sorted({s["scope"] for s in report["suites"]}),
+        statement = review_statement(ref, digest(data), sorted({s["scope"] for s in report["suites"]}),
                                      len([p for p in report["packages"] if p["digest"] != ref["digest"]]))
         self.statement(ref, statement, "guardian")
         return statement
 
     def rejected_before_write(self, ref, code=None, review=True):
         destination = self.root / "absent" / "destination"
-        with self.assertRaises(AepmError) as error:
+        with self.assertRaises(ClodError) as error:
             (extract_review if review else extract)(ref, self.store, destination, self.policy)
         if code:
             self.assertEqual(error.exception.code, code)
@@ -212,7 +212,7 @@ class CoreTests(unittest.TestCase):
     @unittest.skipIf(os.name == "nt", "Windows has no execute bits; the manifest decides")
     def test_source_execute_mode_mismatch(self):
         (self.source / "run.sh").chmod(0o644)
-        with self.assertRaisesRegex(AepmError, "mode-mismatch"):
+        with self.assertRaisesRegex(ClodError, "mode-mismatch"):
             pack(self.source, self.store)
         self.assertFalse(self.store.exists())
 
@@ -220,7 +220,7 @@ class CoreTests(unittest.TestCase):
         pack(self.source, self.store)
         before = (self.store / "catalogue.json").read_bytes()
         (self.source / "CONTRACT.md").write_text("Altered contract")
-        with self.assertRaisesRegex(AepmError, "identity-rebinding"):
+        with self.assertRaisesRegex(ClodError, "identity-rebinding"):
             pack(self.source, self.store)
         self.assertEqual(before, (self.store / "catalogue.json").read_bytes())
 
@@ -229,7 +229,7 @@ class CoreTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.component["files"].append({"path": name, "executable": False})
                 self.update()
-                with self.assertRaisesRegex(AepmError, "excluded-path"):
+                with self.assertRaisesRegex(ClodError, "excluded-path"):
                     pack(self.source, self.store)
                 self.component["files"].pop()
         self.store = self.source / "output"
@@ -237,36 +237,36 @@ class CoreTests(unittest.TestCase):
         (self.store / "record.json").write_text("{}")
         self.component["files"].append({"path": "output/record.json", "executable": False})
         self.update()
-        with self.assertRaisesRegex(AepmError, "store-listed"):
+        with self.assertRaisesRegex(ClodError, "store-listed"):
             pack(self.source, self.store)
 
     def test_source_link_and_embedded_key(self):
         path = self.source / "interface.txt"
         path.unlink()
         path.symlink_to(self.source / "NOTICE")
-        with self.assertRaisesRegex(AepmError, "unsafe-file"):
+        with self.assertRaisesRegex(ClodError, "unsafe-file"):
             pack(self.source, self.store)
         path.unlink()
         path.write_text(self.keys["release"]["privateKey"])
-        with self.assertRaisesRegex(AepmError, "private-key"):
+        with self.assertRaisesRegex(ClodError, "private-key"):
             pack(self.source, self.store)
 
     def test_source_hardlink_and_large_file(self):
         path = self.source / "interface.txt"
         path.unlink()
         os.link(self.source / "NOTICE", path)
-        with self.assertRaisesRegex(AepmError, "unsafe-file"):
+        with self.assertRaisesRegex(ClodError, "unsafe-file"):
             pack(self.source, self.store)
         path.unlink()
         with path.open("wb") as stream:
             stream.truncate(64 * 1024 * 1024 + 1)
-        with self.assertRaisesRegex(AepmError, "file-limit"):
+        with self.assertRaisesRegex(ClodError, "file-limit"):
             pack(self.source, self.store)
         self.assertFalse(self.store.exists())
 
     def test_strict_documents_and_paths(self):
         for data in (b'{"a":1,"a":2}', b'{"a":NaN}', b'{"a":1e999}'):
-            with self.subTest(data=data), self.assertRaises(AepmError):
+            with self.subTest(data=data), self.assertRaises(ClodError):
                 loads(data)
         self.assertEqual(canonical(loads(b'{"position":1.2}')), b'{"position":1.2}')
         for alter in (lambda c: c.update(extra=True),
@@ -280,7 +280,7 @@ class CoreTests(unittest.TestCase):
                       lambda c: c["collect"].append({"id": "secret", "type": "string", "grammar": "label", "required": True, "secret": True, "default": "hidden"})):
             c = copy.deepcopy(self.component)
             alter(c)
-            with self.assertRaises(AepmError):
+            with self.assertRaises(ClodError):
                 validate_component(c)
 
     def test_wrong_field_types_raise_public_error(self):
@@ -293,7 +293,7 @@ class CoreTests(unittest.TestCase):
                 # Several lists legitimately accept the empty list.
                 if value == [] and key in ("collect", "artefacts", "dependencies", "provides", "requires", "images", "vulnerabilityWaivers"):
                     continue
-                with self.subTest(key=key, value=value), self.assertRaises(AepmError):
+                with self.subTest(key=key, value=value), self.assertRaises(ClodError):
                     validate_component(c)
 
     def test_spdx_licence_expression(self):
@@ -308,12 +308,12 @@ class CoreTests(unittest.TestCase):
                            "LicenseRef-", "LicenseRef-a+", "a:b", " MIT", "MIT OR OR BSD", "(MIT) WITH X", "MIT,BSD", 1):
             c = copy.deepcopy(self.component)
             c["identity"]["licence"] = expression
-            with self.subTest(expression=expression), self.assertRaises(AepmError) as caught:
+            with self.subTest(expression=expression), self.assertRaises(ClodError) as caught:
                 validate_component(c)
             self.assertEqual(caught.exception.code, "invalid-licence")
         c = copy.deepcopy(self.component)
         c["identity"]["licenceStatus"] = "deferred"
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             validate_component(c)
 
     def test_prerequisite_grammar(self):
@@ -331,12 +331,12 @@ class CoreTests(unittest.TestCase):
             with self.subTest(prerequisite=prerequisite):
                 c = copy.deepcopy(self.component)
                 c["verification"][1]["requirements"] = [prerequisite]
-                with self.assertRaises(AepmError) as raised:
+                with self.assertRaises(ClodError) as raised:
                     validate_component(c)
                 self.assertEqual(raised.exception.path, "verification.requirements")
 
     def test_optional_requirement_flag(self):
-        entry = {"id": "rules", "type": "ae/contract", "version": "1.0.0", "path": "interface.txt"}
+        entry = {"id": "rules", "type": "com.clodhub/contract", "version": "1.0.0", "path": "interface.txt"}
         for optional in (None, True, False):
             with self.subTest(optional=optional):
                 c = copy.deepcopy(self.component)
@@ -346,20 +346,20 @@ class CoreTests(unittest.TestCase):
             with self.subTest(optional=optional):
                 c = copy.deepcopy(self.component)
                 c["requires"] = [{**entry, "optional": optional}]
-                with self.assertRaises(AepmError) as raised:
+                with self.assertRaises(ClodError) as raised:
                     validate_component(c)
                 self.assertEqual(raised.exception.path, "requires.optional")
         c = copy.deepcopy(self.component)
         c["provides"] = [{**entry, "optional": True}]
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             validate_component(c)
         c = copy.deepcopy(self.component)
         c["requires"] = [{**entry, "extra": True}]
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             validate_component(c)
 
     def test_optional_flag_is_bound_into_the_package_digest(self):
-        entry = {"id": "rules", "type": "ae/contract", "version": "1.0.0", "path": "interface.txt"}
+        entry = {"id": "rules", "type": "com.clodhub/contract", "version": "1.0.0", "path": "interface.txt"}
         self.component["requires"] = [entry]
         self.update()
         plain = pack(self.source, self.store)
@@ -378,11 +378,11 @@ class CoreTests(unittest.TestCase):
                     c = copy.deepcopy(self.component)
                     c["artefacts"][0] = {**plain, key: value}
                     self.assertEqual(validate_component(c)["artefacts"][0][key], value)
-            for value, code in (("clodhub/video", "invalid-slot"), ("application", "invalid-slot"), ("1x", "invalid-slot"),
+            for value, code in (("pkg:clod/com.clodhub/video", "invalid-slot"), ("application", "invalid-slot"), ("1x", "invalid-slot"),
                                 ("", "invalid-slot"), (None, "artefact-condition"), (1, "artefact-condition"),
                                 ({}, "artefact-condition"), ([], "artefact-condition"), (["video"], "artefact-condition"),
                                 (["video", "video"], "artefact-condition"), (["video", 1], "invalid-slot")):
-                with self.subTest(key=key, value=value), self.assertRaises(AepmError) as raised:
+                with self.subTest(key=key, value=value), self.assertRaises(ClodError) as raised:
                     c = copy.deepcopy(self.component)
                     c["artefacts"][0] = {**plain, key: value}
                     validate_component(c)
@@ -393,12 +393,13 @@ class CoreTests(unittest.TestCase):
         for destination in ("components/other/run.sh", "run.sh", "components/samples/run.sh", "Components/sample/run.sh"):
             c = copy.deepcopy(self.component)
             c["artefacts"][0] = {**plain, "destination": destination}
-            with self.subTest(destination=destination), self.assertRaises(AepmError) as raised:
+            with self.subTest(destination=destination), self.assertRaises(ClodError) as raised:
                 validate_component(c)
             self.assertEqual(raised.exception.code, "artefact-owner")
         recipe = copy.deepcopy(self.component)
         recipe["kind"] = "recipe"
-        with self.assertRaises(AepmError) as raised:
+        recipe["identity"]["name"] = "pkg:clod/com.clodhub/sample-recipe"
+        with self.assertRaises(ClodError) as raised:
             validate_component(recipe)
         self.assertEqual(raised.exception.code, "artefact-owner")
         recipe["artefacts"][0] = {**plain, "destination": "app/run.sh"}
@@ -421,7 +422,7 @@ class CoreTests(unittest.TestCase):
                 ([{**plain, "component": "video"}, {**plain, "withoutComponent": "video"},
                   {**plain, "withoutComponent": "video"}], "duplicate-value"),
                 ([{**plain, "component": "video", "withoutComponent": "video"}], "artefact-condition")):
-            with self.subTest(artefacts=artefacts), self.assertRaises(AepmError) as raised:
+            with self.subTest(artefacts=artefacts), self.assertRaises(ClodError) as raised:
                 validate_component({**c, "artefacts": artefacts})
             self.assertEqual(raised.exception.code, code)
 
@@ -437,7 +438,7 @@ class CoreTests(unittest.TestCase):
     def test_invalid_prerequisite_rejected_before_pack_writes(self):
         self.component["verification"][0]["requirements"] = ["native"]
         self.update()
-        with self.assertRaisesRegex(AepmError, "invalid-prerequisite"):
+        with self.assertRaisesRegex(ClodError, "invalid-prerequisite"):
             pack(self.source, self.store)
         self.assertFalse(self.store.exists())
 
@@ -456,7 +457,7 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(binding["lockDigest"], digest(canonical(binding["lock"])))
         refs = sorted([ref, middle_ref, leaf_ref], key=lambda p: p["name"])
         self.assertEqual(binding["assemblyDigest"], digest(canonical({"packages": refs})))
-        from aepm.foundations import class_suites
+        from clod.foundations import class_suites
         declarations = sorted([{"package": p["digest"], **suite} for p in refs
                                for suite in [*read_package(p, self.store)[0]["verification"], *class_suites(read_package(p, self.store)[0])]],
                               key=lambda suite: (suite["package"], suite["id"]))
@@ -466,25 +467,25 @@ class CoreTests(unittest.TestCase):
         for p in refs:
             self.release(p)
         statement = self.guardian(ref)
-        self.assertEqual(statement["predicate"]["dependencyLevels"], {"AEPM_RELEASED": 2})
-        self.assertEqual(statement["predicate"]["verifiedLevels"], ["AEPM_PLATFORM", "AEPM_REQUIRED_LOCAL"])
+        self.assertEqual(statement["predicate"]["dependencyLevels"], {"CLOD_RELEASED": 2})
+        self.assertEqual(statement["predicate"]["verifiedLevels"], ["CLOD_PLATFORM", "CLOD_REQUIRED_LOCAL"])
         verify_package(ref, self.store, self.policy)
-        statement["predicate"]["dependencyLevels"] = {"AEPM_RELEASED": 1}
+        statement["predicate"]["dependencyLevels"] = {"CLOD_RELEASED": 1}
         self.statement(ref, statement, "guardian")
         self.rejected_before_write(ref, "guardian-dependencies", review=False)
-        statement["predicate"]["dependencyLevels"] = {"AEPM_RELEASED": 2}
-        statement["predicate"]["verifiedLevels"] = ["AEPM_REQUIRED_LOCAL"]
+        statement["predicate"]["dependencyLevels"] = {"CLOD_RELEASED": 2}
+        statement["predicate"]["verifiedLevels"] = ["CLOD_REQUIRED_LOCAL"]
         self.statement(ref, statement, "guardian")
         self.rejected_before_write(ref, "guardian-scope", review=False)
 
     def test_review_bindings_reject_dependency_cycles(self):
         other = self.root / "other"
-        fixture(other, "other", dependencies=[{"name": "clodhub/sample", "version": "0.1.0"}])
+        fixture(other, "other", dependencies=[{"name": "pkg:clod/com.clodhub/sample", "version": "0.1.0"}])
         pack(other, self.store)
-        self.component["dependencies"] = [{"name": "clodhub/other", "version": "0.1.0"}]
+        self.component["dependencies"] = [{"name": "pkg:clod/com.clodhub/other", "version": "0.1.0"}]
         self.update()
         ref = pack(self.source, self.store)
-        with self.assertRaisesRegex(AepmError, "dependency-cycle"):
+        with self.assertRaisesRegex(ClodError, "dependency-cycle"):
             review_bindings(ref, self.store)
 
     def test_nested_directory_collision_and_missing_working_directory(self):
@@ -494,10 +495,10 @@ class CoreTests(unittest.TestCase):
         self.component["files"].extend([{"path": "nested/one", "executable": False},
                                         {"path": "Nested/two", "executable": False}])
         self.update()
-        with self.assertRaisesRegex(AepmError, "case-collision"):
+        with self.assertRaisesRegex(ClodError, "case-collision"):
             pack(self.source, self.store)
         self.component["verification"][0]["cwd"] = "missing"
-        with self.assertRaisesRegex(AepmError, "missing-required-path"):
+        with self.assertRaisesRegex(ClodError, "missing-required-path"):
             validate_component(self.component)
 
     def node_sign(self, payload, role="release", payload_type="application/vnd.in-toto+json"):
@@ -523,7 +524,7 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(envelope["signatures"][0]["sig"], self.node_sign(canonical(statement)))
         self.assertEqual(statement["_type"], "https://in-toto.io/Statement/v1")
         self.assertEqual(statement["predicateType"], RELEASE)
-        self.assertEqual(statement["predicate"], {"purl": "pkg:github/clodhub/sample@v0.1.0", "releaseId": "clodhub/sample"})
+        self.assertEqual(statement["predicate"], {"purl": "pkg:clod/com.clodhub/sample@0.1.0", "releaseId": "pkg:clod/com.clodhub/sample"})
         self.assertEqual(statement["subject"][0]["digest"], {"sha256": ref["digest"]})
         self.assertEqual(verify(canonical(envelope), "release", self.policy, RELEASE), (statement, digest(public)))
         urlsafe = {**envelope, "payload": base64.urlsafe_b64encode(canonical(statement)).decode().rstrip("=")}
@@ -536,27 +537,27 @@ class CoreTests(unittest.TestCase):
         envelope = {"payload": base64.b64encode(encoded).decode(), "payloadType": "application/vnd.in-toto+json",
                     "signatures": [{"keyid": sign(statement, "release", self.root / "release.pem")["signatures"][0]["keyid"],
                                     "sig": self.node_sign(encoded)}]}
-        with self.assertRaisesRegex(AepmError, "noncanonical-statement"):
+        with self.assertRaisesRegex(ClodError, "noncanonical-statement"):
             verify(canonical(envelope), "release", self.policy, RELEASE)
-        with self.assertRaisesRegex(AepmError, "noncanonical-envelope"):
+        with self.assertRaisesRegex(ClodError, "noncanonical-envelope"):
             verify(json.dumps(sign(statement, "release", self.root / "release.pem"), indent=1).encode(), "release", self.policy, RELEASE)
         for change in (lambda s: s.update(publicKey="x"), lambda s: s["predicate"].update(extra=1),
                        lambda s: s["subject"][0].update(uri="x"), lambda s: s["subject"].append(dict(s["subject"][0])),
                        lambda s: s.update(_type="https://in-toto.io/Statement/v0.1")):
             altered = json.loads(canonical(statement))
             change(altered)
-            with self.subTest(statement=altered), self.assertRaises(AepmError):
+            with self.subTest(statement=altered), self.assertRaises(ClodError):
                 sign(altered, "release", self.root / "release.pem")
         envelope = sign(statement, "release", self.root / "release.pem")
         for change in (lambda e: e.update(payloadType="application/json"), lambda e: e.update(extra=1),
                        lambda e: e.update(signatures=[]), lambda e: e["signatures"][0].update(sig="AAAA")):
             altered = json.loads(canonical(envelope))
             change(altered)
-            with self.subTest(envelope=altered), self.assertRaises(AepmError):
+            with self.subTest(envelope=altered), self.assertRaises(ClodError):
                 verify(canonical(altered), "release", self.policy, RELEASE)
         signed_type = {**envelope, "payloadType": "application/json"}
         signed_type["signatures"] = [{**envelope["signatures"][0], "sig": self.node_sign(canonical(statement), payload_type="application/json")}]
-        with self.assertRaisesRegex(AepmError, "payload-type"):
+        with self.assertRaisesRegex(ClodError, "payload-type"):
             verify(canonical(signed_type), "release", self.policy, RELEASE)
 
     def test_transitive_resolution_and_conflict(self):
@@ -573,19 +574,19 @@ class CoreTests(unittest.TestCase):
         self.update()
         root_ref = pack(self.source, self.store)
         lock = resolve([{"name": root_ref["name"], "version": "0.1.0"}], self.store / "catalogue.json", "app", "a" * 64)
-        self.assertEqual([p["name"] for p in lock["packages"]], ["clodhub/leaf", "clodhub/middle", "clodhub/sample"])
+        self.assertEqual([p["name"] for p in lock["packages"]], ["pkg:clod/com.clodhub/leaf", "pkg:clod/com.clodhub/middle", "pkg:clod/com.clodhub/sample"])
         self.assertEqual(lock["packages"][1]["dependencies"], [{"name": leaf_ref["name"], "digest": leaf_ref["digest"]}])
-        with self.assertRaisesRegex(AepmError, "dependency-conflict"):
+        with self.assertRaisesRegex(ClodError, "dependency-conflict"):
             resolve([{"name": root_ref["name"], "version": "0.1.0"}, {"name": leaf_ref["name"], "version": "0.1.1"}], self.store / "catalogue.json", "app", "a" * 64)
 
     def test_lock_validation(self):
         ref = pack(self.source, self.store)
         lock = resolve([{"name": ref["name"], "version": ref["version"]}], self.store / "catalogue.json", "app", "a" * 64)
         for alter in (lambda c: c.update(extra=True), lambda c: c["packages"].append(c["packages"][0]),
-                      lambda c: c["packages"][0]["dependencies"].append({"name": "clodhub/absent", "digest": "b" * 64})):
+                      lambda c: c["packages"][0]["dependencies"].append({"name": "pkg:clod/com.clodhub/absent", "digest": "b" * 64})):
             c = copy.deepcopy(lock)
             alter(c)
-            with self.assertRaises(AepmError):
+            with self.assertRaises(ClodError):
                 validate_lock(c)
 
     def test_changed_archive_bytes_before_writes(self):
@@ -643,24 +644,24 @@ class CoreTests(unittest.TestCase):
         ref = pack(self.source, self.store)
         statement = self.release(ref)
         envelope = canonical(sign(statement, "release", self.root / "guardian.pem"))
-        with self.assertRaisesRegex(AepmError, "invalid-signature"):
+        with self.assertRaisesRegex(ClodError, "invalid-signature"):
             verify(envelope, "release", self.policy, RELEASE)
         envelope = canonical(sign(statement, "release", self.root / "release.pem"))
-        with self.assertRaisesRegex(AepmError, "invalid-signature"):
+        with self.assertRaisesRegex(ClodError, "invalid-signature"):
             verify(envelope, "guardian", self.policy, REVIEW)
-        with self.assertRaisesRegex(AepmError, "statement-role"):
+        with self.assertRaisesRegex(ClodError, "statement-role"):
             verify(envelope, "release", self.policy, REVIEW)
-        with self.assertRaisesRegex(AepmError, "statement-role"):
+        with self.assertRaisesRegex(ClodError, "statement-role"):
             sign(statement, "guardian", self.root / "guardian.pem")
         self.assertEqual(verify(envelope, "release", self.policy, RELEASE)[0], statement)
         wrong_keyid = json.loads(envelope)
         wrong_keyid["signatures"][0]["keyid"] = "a" * 64
-        with self.assertRaisesRegex(AepmError, "key-id-mismatch"):
+        with self.assertRaisesRegex(ClodError, "key-id-mismatch"):
             verify(canonical(wrong_keyid), "release", self.policy, RELEASE)
         policy = loads(self.policy.read_bytes())
         policy["keys"]["guardian"][0]["publicKey"] = policy["keys"]["release"][0]["publicKey"]
         self.policy.write_bytes(canonical(policy))
-        with self.assertRaisesRegex(AepmError, "duplicate-value"):
+        with self.assertRaisesRegex(ClodError, "duplicate-value"):
             verify(envelope, "release", self.policy, RELEASE)
 
     def test_statement_identity_version_rebinding(self):
@@ -668,8 +669,8 @@ class CoreTests(unittest.TestCase):
         statement = self.release(ref)
         for change in (lambda s: s["subject"][0].update(name="other-0.1.0.tar"),
                        lambda s: s["subject"][0]["digest"].update(sha256="a" * 64),
-                       lambda s: s["predicate"].update(purl="pkg:github/clodhub/sample@v0.1.1"),
-                       lambda s: s["predicate"].update(releaseId="clodhub/other"),
+                       lambda s: s["predicate"].update(purl="pkg:clod/com.clodhub/sample@0.1.1"),
+                       lambda s: s["predicate"].update(releaseId="pkg:clod/com.clodhub/other"),
                        lambda s: s["subject"][0]["annotations"].update(sourceTreeDigest="a" * 64)):
             altered = json.loads(canonical(statement))
             change(altered)
@@ -721,12 +722,13 @@ class CoreTests(unittest.TestCase):
         self.guardian(ref, report)
         verify_package(ref, self.store, self.policy)
         statement = self.guardian(ref, report)
-        statement["predicate"]["dependencyLevels"] = {"AEPM_RELEASED": 0}
+        statement["predicate"]["dependencyLevels"] = {"CLOD_RELEASED": 0}
         self.statement(ref, statement, "guardian")
         self.rejected_before_write(ref, "guardian-dependencies", review=False)
 
     def test_recipe_review_excludes_application_suites(self):
         self.component["kind"] = "recipe"
+        self.component["identity"]["name"] = "pkg:clod/com.clodhub/sample-recipe"
         self.component["artefacts"][0]["destination"] = "run.sh"
         application_suite = {**self.component["verification"][0], "id": "application", "root": "application"}
         self.component["verification"].append(application_suite)
@@ -745,11 +747,11 @@ class CoreTests(unittest.TestCase):
         target = self.root / "target"
         target.mkdir()
         (target / "keep").write_text("keep")
-        with self.assertRaisesRegex(AepmError, "destination-not-empty"):
+        with self.assertRaisesRegex(ClodError, "destination-not-empty"):
             extract_review(ref, self.store, target, self.policy)
         alias = self.root / "alias"
         alias.symlink_to(target, target_is_directory=True)
-        with self.assertRaisesRegex(AepmError, "unsafe-file"):
+        with self.assertRaisesRegex(ClodError, "unsafe-file"):
             extract_review(ref, self.store, alias / "child", self.policy)
         self.assertEqual((target / "keep").read_text(), "keep")
         self.assertFalse((target / "child").exists())

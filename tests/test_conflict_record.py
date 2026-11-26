@@ -8,10 +8,10 @@ import stat
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from aepm import contextual, private_process
-from aepm.model import AepmError
-from aepm.private_process import Identity, PrivateScope, enroll_root
-from aepm.supervision import Recorder
+from clod import contextual, private_process
+from clod.model import ClodError
+from clod.private_process import Identity, PrivateScope, enroll_root
+from clod.supervision import Recorder
 from tests.test_capture_race import Guarded
 from tests.test_private_process import FakeBackend
 
@@ -44,14 +44,14 @@ class ConflictRecordTests(Guarded):
         return json.loads(path.read_text())
 
     def assert_conflict(self, action):
-        with self.assertRaises(AepmError) as caught:
+        with self.assertRaises(ClodError) as caught:
             action()
         self.assertEqual((caught.exception.code, caught.exception.path), ("cleanup-failed", "private-process-conflict"))
 
     def scan_conflict(self, backend, root=None, during=None):
         root = root or self.root
-        with patch("aepm.private_process.DarwinBackend", return_value=backend), \
-                patch("aepm.private_process.LinuxBackend", return_value=backend):
+        with patch("clod.private_process.DarwinBackend", return_value=backend), \
+                patch("clod.private_process.LinuxBackend", return_value=backend):
             scope = PrivateScope(root)
         self.addCleanup(scope.close)
         scope.bind(300)
@@ -153,13 +153,13 @@ class ConflictRecordTests(Guarded):
 
         def run(argv, cwd, environment, timeout, limit, *, diagnostics=None, **_):
             backend = FakeBackend({200: process(200)})
-            with patch("aepm.private_process.DarwinBackend", return_value=backend):
-                scope = PrivateScope(environment["AEPM_PRIVATE_ROOT"])
+            with patch("clod.private_process.DarwinBackend", return_value=backend):
+                scope = PrivateScope(environment["CLOD_PRIVATE_ROOT"])
             try:
                 scope.bind(300)
-                backend.records[200].cwd = str(Path(environment["AEPM_PRIVATE_ROOT"]) / "root")
+                backend.records[200].cwd = str(Path(environment["CLOD_PRIVATE_ROOT"]) / "root")
                 scope.scan(force=True)
-            except AepmError:
+            except ClodError:
                 return -9, 1, "cleanup-failed", b""
             finally:
                 scope.close()
@@ -167,7 +167,7 @@ class ConflictRecordTests(Guarded):
 
         with patch.object(contextual, "VerificationDirectory", return_value=workspace), \
                 patch.object(contextual, "tool_environment", side_effect=lambda home, *a, **k: {"PATH": "/usr/bin",
-                             "AEPM_PRIVATE_ROOT": str(home.parent)}), \
+                             "CLOD_PRIVATE_ROOT": str(home.parent)}), \
                 patch.object(contextual, "tool_versions", return_value={}), \
                 patch.object(contextual, "prerequisites", return_value=[]), \
                 patch.object(contextual, "resolve_command", side_effect=lambda argv, *a, **k: argv), \

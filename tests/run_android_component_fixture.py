@@ -5,14 +5,14 @@ from copy import deepcopy
 from pathlib import Path
 import sys
 
-from aepm.authorization import execution_request, authorize_execution
-from aepm.bundle import extract_review, ordinary_path, pack, read_package
-from aepm.contextual import execute
-from aepm.environment import Execution, clock
-from aepm.io import load, private_directory, snapshot, write
-from aepm.model import AepmError, canonical, digest, package_ref, validate_component, validate_execution_context
-from aepm.test_identities import generate
-from aepm.trust import load_policy, publish_release, publish_review, review_bindings, sign, verify_release
+from clod.authorization import execution_request, authorize_execution
+from clod.bundle import extract_review, ordinary_path, pack, read_package
+from clod.contextual import execute
+from clod.environment import Execution, clock
+from clod.io import load, private_directory, snapshot, write
+from clod.model import ClodError, canonical, digest, package_ref, validate_component, validate_execution_context
+from clod.test_identities import generate
+from clod.trust import load_policy, publish_release, publish_review, review_bindings, sign, verify_release
 
 
 def inputs(source, context, out):
@@ -36,7 +36,7 @@ def inputs(source, context, out):
         if out.is_relative_to(original) or original.is_relative_to(out):
             raise ValueError("Output and inputs must be disjoint")
     manifest = validate_component(load(source / "component.json"))
-    if (manifest["identity"]["name"], manifest["identity"]["version"], manifest["kind"]) != ("clodhub/video-calls", "0.1.2", "component") or manifest["dependencies"]:
+    if (manifest["identity"]["name"], manifest["identity"]["version"], manifest["kind"]) != ("pkg:clod/com.clodhub/video-calls", "0.1.2", "component") or manifest["dependencies"]:
         raise ValueError("This release covers only the dependency-free video-calls 0.1.2 component")
     matches = [suite for suite in manifest["verification"] if suite["id"] == "android-media"]
     if len(matches) != 1:
@@ -83,7 +83,7 @@ def retain_result(out, output, execution, source, before):
         return output["accepted"]
     except BaseException as error:
         output.update(postChecks="failed", accepted=False,
-                      postCheckReason=error.code if isinstance(error, AepmError) else type(error).__name__)
+                      postCheckReason=error.code if isinstance(error, ClodError) else type(error).__name__)
         write(out / "focused-result.json", output)
         raise
 
@@ -151,7 +151,7 @@ def check(source, context, out):
         return 0 if accepted else 1
     except BaseException as error:
         write(out / "state.json", {"phase": "failed", "completeProof": False,
-                                   "reason": error.code if isinstance(error, AepmError) else type(error).__name__})
+                                   "reason": error.code if isinstance(error, ClodError) else type(error).__name__})
         raise
 
 

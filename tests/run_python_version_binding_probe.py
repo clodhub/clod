@@ -119,10 +119,10 @@ def main(expected_controller):
     sys.path.insert(0, str(INSTALLER))
     from tests.run_android_discovery_fixture import inventory_check
     inventory_check(INPUT / "inventory.json", INVENTORY_DIGEST, OUT)
-    from aepm import contextual
-    from aepm.private_process import enroll_root
-    from aepm.process import run
-    from aepm.supervision import Recorder
+    from clod import contextual
+    from clod.private_process import enroll_root
+    from clod.process import run
+    from clod.supervision import Recorder
     require(sha(ARCHIVE) == PACKAGE, "archive drift")
     with tarfile.open(ARCHIVE) as archive:
         member = archive.getmember("component.json")

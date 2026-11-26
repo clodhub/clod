@@ -5,7 +5,7 @@ import tempfile
 import time
 import unittest
 
-from aepm.process import run
+from clod.process import run
 
 
 class ProcessTests(unittest.TestCase):

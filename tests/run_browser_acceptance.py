@@ -12,12 +12,12 @@ import sys
 import time
 from unittest.mock import patch
 
-from aepm.contextual import tool_environment, tool_versions
-from aepm.io import immutable_blob, load, private_directory, write
-from aepm.model import canonical, digest
-from aepm.posix_process import DarwinProcessInfo, ExitObserver
-from aepm.process import run
-from aepm.private_process import PrivateScope
+from clod.contextual import tool_environment, tool_versions
+from clod.io import immutable_blob, load, private_directory, write
+from clod.model import canonical, digest
+from clod.posix_process import DarwinProcessInfo, ExitObserver
+from clod.process import run
+from clod.private_process import PrivateScope
 
 
 class Observer:

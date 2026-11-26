@@ -10,12 +10,12 @@ import threading
 import time
 from unittest.mock import patch
 
-from aepm.contextual import tool_environment
-from aepm.io import VerificationDirectory, load, private_directory, write
-from aepm.model import canonical, digest
-from aepm.posix_process import ContainedProcess
-from aepm.private_process import DarwinBackend, PrivateScope
-from aepm.process import run
+from clod.contextual import tool_environment
+from clod.io import VerificationDirectory, load, private_directory, write
+from clod.model import canonical, digest
+from clod.posix_process import ContainedProcess
+from clod.private_process import DarwinBackend, PrivateScope
+from clod.process import run
 
 
 CHILD = """import json,os,time
@@ -235,7 +235,7 @@ def diagnostic(out):
     if out.exists() or not out.parent.is_dir():
         raise FileExistsError('Use a fresh private output')
     out.mkdir(mode=0o700)
-    source = Path(__file__).resolve().parents[1] / 'aepm'
+    source = Path(__file__).resolve().parents[1] / 'clod'
     hashes = {name: digest((source / name).read_bytes()) for name in ('process.py', 'posix_process.py', 'private_process.py')}
     started = time.monotonic()
     write(out / 'state.json', {'phase': 'running', 'completeProof': False, 'sourceHashes': hashes})

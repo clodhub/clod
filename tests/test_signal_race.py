@@ -6,10 +6,10 @@ import queue
 import signal
 from unittest.mock import Mock, patch
 
-from aepm import process
-from aepm.model import AepmError
-from aepm.private_process import AuditToken, DarwinBackend, Identity, SignalRace
-from aepm.supervision import Recorder
+from clod import process
+from clod.model import ClodError
+from clod.private_process import AuditToken, DarwinBackend, Identity, SignalRace
+from clod.supervision import Recorder
 from tests.test_capture_race import Clock, Guarded
 from tests.test_private_process import FakeBackend
 
@@ -42,7 +42,7 @@ class SignalRaceTests(Guarded):
     def setUp(self):
         super().setUp()
         self.clock = Clock()
-        guard = patch("aepm.private_process.time", self.clock)
+        guard = patch("clod.private_process.time", self.clock)
         guard.start()
         self.addCleanup(guard.stop)
 
@@ -196,7 +196,7 @@ class SignalRaceTests(Guarded):
         messages.get.side_effect = [(0, b""), (1, b"")]
         thread = Mock()
         thread.is_alive.return_value = False
-        with patch("aepm.posix_process.ContainedProcess", return_value=instance), \
+        with patch("clod.posix_process.ContainedProcess", return_value=instance), \
                 patch.object(process.threading, "Thread", return_value=thread), \
                 patch.object(process.queue, "Queue", return_value=messages):
             code, _, reason, _ = process.run(["fixture"], self.root, {}, 10, diagnostics=recorder)

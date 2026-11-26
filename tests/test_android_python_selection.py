@@ -7,9 +7,9 @@ import shutil
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from aepm import contextual
-from aepm.model import AepmError
-from aepm.supervision import Recorder
+from clod import contextual
+from clod.model import ClodError
+from clod.supervision import Recorder
 from tests import test_android_discovery_fixture as fixtures
 from tests import run_android_discovery_fixture as entry
 
@@ -152,6 +152,6 @@ class PythonSelectionTests(fixtures.GuardedTests):
                 if matched:
                     self.assertEqual(contextual.tool_versions({"tools": {"python3": "3.12"}}, self.root, {}), {"python3": "3.12.8"})
                 else:
-                    with self.assertRaises(AepmError) as caught:
+                    with self.assertRaises(ClodError) as caught:
                         contextual.tool_versions({"tools": {"python3": "3.12"}}, self.root, {})
                     self.assertEqual(caught.exception.code, "tool-version-mismatch")

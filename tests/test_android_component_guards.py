@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-from aepm.model import AepmError
+from clod.model import ClodError
 from tests import run_android_component_fixture as harness
 
 
@@ -25,7 +25,7 @@ class AndroidComponentGuardTests(unittest.TestCase):
     def reject(self, source, context, out):
         before = sorted(str(path.relative_to(self.root)) for path in self.root.rglob("*"))
         with patch.object(harness, "load", side_effect=AssertionError("validation read before path guard")):
-            with self.assertRaises((AepmError, ValueError)):
+            with self.assertRaises((ClodError, ValueError)):
                 harness.inputs(source, context, out)
         self.assertEqual(before, sorted(str(path.relative_to(self.root)) for path in self.root.rglob("*")))
 
@@ -59,7 +59,7 @@ class AndroidComponentGuardTests(unittest.TestCase):
         self.assertEqual(marker.read_bytes(), b"unchanged")
 
     def test_packed_metadata_allows_only_derived_tree_digest_change(self):
-        initial = {"identity": {"name": "clodhub/video-calls", "version": "0.1.2",
+        initial = {"identity": {"name": "pkg:clod/com.clodhub/video-calls", "version": "0.1.2",
                                 "sourceTreeDigest": "initial"},
                    "verification": [{"id": "android-media", "argv": ["approved"]}]}
         packed = deepcopy(initial)
@@ -97,9 +97,9 @@ class AndroidComponentGuardTests(unittest.TestCase):
             retained = json.loads((self.out / "focused-result.json").read_text())
             self.assertEqual(retained["evidence"], output["evidence"])
             self.assertEqual(retained["postChecks"], "pending")
-            raise AepmError("execution-expired", "fixture")
+            raise ClodError("execution-expired", "fixture")
 
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             harness.retain_result(self.out, output, Mock(check_time=expire), self.source, [])
         self.assert_retained(output)
 

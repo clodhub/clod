@@ -15,7 +15,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from aepm.model import AepmError, canonical, digest
+from clod.model import ClodError, canonical, digest
 from tests.core.test_core import PYTHON, fixture
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,7 +27,7 @@ class Base(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
-        patcher = patch.dict(os.environ, {"AEPM_STATE_HOME": str(self.root / "state"), "AEPM_FREE_SPACE_MARGIN": "0"})
+        patcher = patch.dict(os.environ, {"CLOD_STATE_HOME": str(self.root / "state"), "CLOD_FREE_SPACE_MARGIN": "0"})
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -44,19 +44,19 @@ class Base(unittest.TestCase):
         return source
 
     def leftovers(self):
-        return sorted(path.name for path in Path(tempfile.gettempdir()).iterdir() if path.name.startswith("aepm-verification-")
+        return sorted(path.name for path in Path(tempfile.gettempdir()).iterdir() if path.name.startswith("clod-verification-")
                       and (path / "root").exists() and any(entry["root"] == str(path) for entry in self.entries()))
 
     def entries(self):
-        from aepm.ledger import entries
+        from clod.ledger import entries
         return entries()
 
 
 class CheckSpaceTests(Base):
     def test_low_free_space_blocks_before_any_copy(self):
-        from aepm.verification import execute_suite
+        from clod.verification import execute_suite
         before = set(Path(tempfile.gettempdir()).iterdir())
-        with patch("aepm.space.shutil.disk_usage", return_value=type("U", (), {"free": 1000, "total": 1000})()):
+        with patch("clod.space.shutil.disk_usage", return_value=type("U", (), {"free": 1000, "total": 1000})()):
             result = execute_suite(self.suite(), self.package(), False, self.root / "logs")
         self.assertEqual((result["status"], result["reason"]), ("blocked", "insufficient-space"))
         self.assertEqual(result["space"]["free"], 1000)
@@ -64,8 +64,8 @@ class CheckSpaceTests(Base):
         self.assertEqual(set(Path(tempfile.gettempdir()).iterdir()), before)
 
     def test_out_of_space_during_the_check_copy_fails_and_removes_the_root(self):
-        from aepm import copying
-        from aepm.verification import execute_suite
+        from clod import copying
+        from clod.verification import execute_suite
         original = copying.copy_file
 
         def full(source, destination, **options):
@@ -73,19 +73,19 @@ class CheckSpaceTests(Base):
                 raise OSError(errno.ENOSPC, "No space left on device", str(destination))
             return original(source, destination, **options)
 
-        with patch("aepm.copying.copy_file", full):
+        with patch("clod.copying.copy_file", full):
             result = execute_suite(self.suite(), self.package(), False, self.root / "logs")
         self.assertEqual((result["status"], result["reason"], result["storage"]["keptBytes"]), ("failed", "insufficient-space", 0))
         self.assertIn("data.bin", result["space"]["path"])
         self.assertEqual([entry for entry in self.entries() if entry["kind"] == "check"], [])
 
     def test_report_stops_remaining_checks_and_still_verifies(self):
-        from aepm.bundle import pack
-        from aepm.io import load, write
-        from aepm.test_identities import generate
-        from aepm.trust import publish_release, publish_review, review_bindings, validate_report_evidence
-        from aepm.verification import review_package
-        from aepm import copying
+        from clod.bundle import pack
+        from clod.io import load, write
+        from clod.test_identities import generate
+        from clod.trust import publish_release, publish_review, review_bindings, validate_report_evidence
+        from clod.verification import review_package
+        from clod import copying
         source = self.root / "source"
         manifest = fixture(source)
         manifest["verification"].append({**manifest["verification"][0], "id": "later"})
@@ -104,7 +104,7 @@ class CheckSpaceTests(Base):
                 raise OSError(errno.ENOSPC, "No space left on device", str(destination))
             return original(source_path, destination, **options)
 
-        with patch("aepm.copying.copy_file", full):
+        with patch("clod.copying.copy_file", full):
             report = review_package(ref, store, policy, True)
         results = {item["id"]: item for item in report["suites"]}
         first = sorted(report["suites"], key=lambda item: (item["package"], item["id"]))
@@ -115,15 +115,15 @@ class CheckSpaceTests(Base):
         self.assertEqual(report["summary"]["required-local"], "failed")
         self.assertEqual({path.name: path.read_bytes() for path in (store / "objects").iterdir()}, objects)
         binding = review_bindings(ref, store)
-        with self.assertRaisesRegex(AepmError, "report-verdict"):
+        with self.assertRaisesRegex(ClodError, "report-verdict"):
             validate_report_evidence(report, binding, "review", store, policy)
-        with self.assertRaisesRegex(AepmError, "report-verdict"):
+        with self.assertRaisesRegex(ClodError, "report-verdict"):
             publish_review(store, ref, report, self.root / "keys/guardian.pem", policy=policy)
         self.assertIn("later", results)
 
     def test_atomic_writes_leave_no_partial_file_when_the_volume_is_full(self):
-        from aepm.bundle import atomic_write
-        from aepm.io import write
+        from clod.bundle import atomic_write
+        from clod.io import write
         target = self.root / "out"
         target.mkdir()
         (target / "existing.json").write_bytes(b"{}")
@@ -133,31 +133,34 @@ class CheckSpaceTests(Base):
             raise OSError(errno.ENOSPC, "No space left on device")
 
         for function in (lambda: atomic_write(target / "existing.json", b"x" * 1000), lambda: write(target / "existing.json", {"new": 1})):
-            with self.subTest(function=function), patch("os.fsync", full), self.assertRaises((AepmError, OSError)) as raised:
+            with self.subTest(function=function), patch("os.fsync", full), self.assertRaises((ClodError, OSError)) as raised:
                 function()
             error = raised.exception
-            if isinstance(error, AepmError):
+            if isinstance(error, ClodError):
                 self.assertEqual(error.code, "insufficient-space")
             self.assertEqual(sorted(path.name for path in target.iterdir()), ["existing.json"])
             self.assertEqual((target / "existing.json").read_bytes(), b"{}")
         self.assertIs(os.fsync, real)
 
     def test_install_refuses_without_space_and_creates_nothing(self):
-        from aepm.application import assemble
+        from clod.application import assemble
         base = Path(tempfile.mkdtemp(dir=self.root))
         store = self.root / "store"
-        from aepm.bundle import pack
+        from clod.bundle import pack
         source = self.root / "source"
-        fixture(source)
+        manifest = fixture(source, "sample-recipe")
+        manifest.update(kind="recipe", implements=[])
+        manifest["artefacts"][0]["destination"] = "run.sh"
+        (source / "component.json").write_bytes(canonical(manifest))
         ref = pack(source, store)
-        definition = {"format": 2, "id": "app", "title": "App", "recipe": {"name": ref["name"], "version": ref["version"]},
+        definition = {"format": 3, "id": "app", "title": "App", "recipe": {"name": ref["name"], "version": ref["version"]},
                       "components": [], "configuration": {}, "design": {"definitions": [], "instances": [], "connections": []},
                       "updatePolicy": {"security": "auto", "features": "manual", "preview": "hold"}}
-        lock = {"format": 1, "application": "app", "definitionDigest": digest(canonical(definition)),
+        lock = {"format": 2, "application": "app", "definitionDigest": digest(canonical(definition)),
                 "packages": [{**ref, "dependencies": []}]}
         before = sorted(base.iterdir())
-        with patch("aepm.space.shutil.disk_usage", return_value=type("U", (), {"free": 10, "total": 10})()):
-            with self.assertRaises(AepmError) as raised:
+        with patch("clod.space.shutil.disk_usage", return_value=type("U", (), {"free": 10, "total": 10})()):
+            with self.assertRaises(ClodError) as raised:
                 assemble(definition, lock, store, base / "app", self.root / "policy.json")
         self.assertEqual(raised.exception.code, "insufficient-space")
         self.assertEqual(sorted(base.iterdir()), before)
@@ -165,9 +168,9 @@ class CheckSpaceTests(Base):
     def test_command_line_prints_the_numbers(self):
         import contextlib
         import io
-        from aepm.__main__ import main
+        from clod.__main__ import main
         output = io.StringIO()
-        with patch("aepm.space.shutil.disk_usage", return_value=type("U", (), {"free": 10, "total": 10})()), contextlib.redirect_stdout(output):
+        with patch("clod.space.shutil.disk_usage", return_value=type("U", (), {"free": 10, "total": 10})()), contextlib.redirect_stdout(output):
             fixture(self.root / "source")
             code = main(["pack", str(self.root / "source"), "--store", str(self.root / "store")])
         value = json.loads(output.getvalue())
@@ -178,15 +181,15 @@ class CheckSpaceTests(Base):
 
 class UnauthorizedCheckTests(Base):
     def test_an_unauthorized_check_needs_no_space(self):
-        from aepm.contextual import execute
+        from clod.contextual import execute
         class Execution:
             context = {"resources": []}
 
             def selection(self, suite):
-                raise AepmError("authorization-denied", "suite")
+                raise ClodError("authorization-denied", "suite")
 
             def prepare(self, suite, private):
-                raise AepmError("authorization-denied", "suite")
+                raise ClodError("authorization-denied", "suite")
 
             def check_time(self):
                 pass
@@ -194,21 +197,21 @@ class UnauthorizedCheckTests(Base):
             authorization = None
         suite = self.suite(execution={"kind": "native", "simulation": False, "operations": ["native-build"], "settings": [], "secrets": [],
                                       "resources": [], "assertions": ["build-produced"], "cleanup": None}, tools={"java": "26"})
-        with patch("aepm.space.shutil.disk_usage", return_value=type("U", (), {"free": 10, "total": 10})()):
+        with patch("clod.space.shutil.disk_usage", return_value=type("U", (), {"free": 10, "total": 10})()):
             result, _ = execute(suite, self.package(), False, self.root / "logs", Execution())
         self.assertEqual(result["reason"], "authorization-denied")
 
 
 class ReportFormatTests(Base):
     def test_reports_without_storage_and_lock_records_are_refused(self):
-        from aepm.trust import validate_report_evidence
+        from clod.trust import validate_report_evidence
         from tests.core.test_core import CoreTests
         case = CoreTests("test_report_bytes_and_suite_coverage")
         CoreTests.setUpClass()
         case.setUp()
         self.addCleanup(case.temp.cleanup)
-        from aepm.bundle import pack
-        from aepm.trust import review_bindings
+        from clod.bundle import pack
+        from clod.trust import review_bindings
         ref = pack(case.source, case.store)
         report = case.report(ref)
         binding = review_bindings(ref, case.store)
@@ -217,18 +220,18 @@ class ReportFormatTests(Base):
             earlier = json.loads(canonical(report))
             for suite in earlier["suites"]:
                 suite.pop(key)
-            with self.subTest(missing=key), self.assertRaisesRegex(AepmError, "report-format-outdated"):
+            with self.subTest(missing=key), self.assertRaisesRegex(ClodError, "report-format-outdated"):
                 validate_report_evidence(earlier, binding, "review", None, None)
         for change in (lambda item: item["storage"].update(keptBytes=5), lambda item: item["locks"].append({"kind": "disk", "waitedMilliseconds": 0}),
                        lambda item: item.update(space={"path": "/", "purpose": "x", "required": 1, "free": 1, "margin": 0, "reserved": 0})):
             changed = json.loads(canonical(report))
             change(changed["suites"][0])
-            with self.assertRaises(AepmError):
+            with self.assertRaises(ClodError):
                 validate_report_evidence(changed, binding, "review", None, None)
 
 
 class InterruptionTests(Base):
-    CHECK = ("import os, sys\nfrom pathlib import Path\nfrom aepm.verification import execute_suite\n"
+    CHECK = ("import os, sys\nfrom pathlib import Path\nfrom clod.verification import execute_suite\n"
              "suite = {'package': '0' * 64, 'id': 'slow', 'scope': 'required-local', 'root': 'package', 'argv': [sys.argv[2], '-c', "
              "\"import time; open('started', 'w').close(); time.sleep(60)\"], 'cwd': '.', 'prepare': [], 'tools': {sys.argv[2]: '3'}, "
              "'fixtures': [], 'locks': [], 'network': False, 'timeoutSeconds': 120, 'expectedExit': 0, 'requirements': []}\n"
@@ -247,7 +250,7 @@ class InterruptionTests(Base):
         else:
             self.fail(process.stderr.read().decode())
         root = Path(roots[0]["root"])
-        from aepm.clean import survey
+        from clod.clean import survey
         self.assertEqual(next(item for item in survey()["protected"] if item["path"] == str(root))["reason"], "owner-alive")
         os.kill(process.pid, number)
         process.wait(timeout=60)
@@ -256,7 +259,7 @@ class InterruptionTests(Base):
     @staticmethod
     def inside(root):
         """Process ids whose executable or working folder is inside root."""
-        from aepm.private_process import DarwinBackend, LinuxBackend, _matches
+        from clod.private_process import DarwinBackend, LinuxBackend, _matches
         backend = DarwinBackend() if sys.platform == "darwin" else LinuxBackend()
         found = []
         for pid in backend.pids():
@@ -273,7 +276,7 @@ class InterruptionTests(Base):
     def test_crash_leaves_a_ledgered_root_that_clean_removes_only_after_the_owner_died(self):
         root = self.interrupted(signal.SIGKILL)
         self.assertTrue(root.exists())
-        from aepm.clean import clean, survey
+        from clod.clean import clean, survey
         leftovers = self.inside(root)
         if leftovers:
             # The killed run's check process outlives it; while it runs there, the root stays protected.
@@ -292,7 +295,7 @@ class InterruptionTests(Base):
     def test_cancellation_removes_the_root_or_leaves_it_ledgered(self):
         root = self.interrupted(signal.SIGINT)
         if root.exists():
-            from aepm.clean import clean
+            from clod.clean import clean
             self.assertIn(str(root), [item["path"] for item in clean()["candidates"]])
             clean(apply=True)
         self.assertFalse(root.exists())
@@ -317,7 +320,7 @@ class CopyTests(Base):
         return result
 
     def test_clone_and_byte_copy_give_identical_trees(self):
-        from aepm import copying
+        from clod import copying
         source = self.tree()
         listings = {}
         for clones in (True, False):
@@ -331,15 +334,15 @@ class CopyTests(Base):
         self.assertEqual(listings[True], self.listing(source))
 
     def test_unsupported_clone_falls_back_to_bytes(self):
-        from aepm import copying
+        from clod import copying
         source = self.tree()
-        with patch("aepm.copying.clone_file", return_value=False):
+        with patch("clod.copying.clone_file", return_value=False):
             counts = copying.copy_tree(source, self.root / "copy")
         self.assertEqual((counts["clone"], counts["bytes"]), (0, 2))
         self.assertEqual(self.listing(self.root / "copy"), self.listing(source))
 
     def test_clone_is_independent_of_its_source(self):
-        from aepm.copying import copy_file
+        from clod.copying import copy_file
         source = self.root / "original"
         source.write_bytes(b"a" * 100000)
         copy_file(source, self.root / "copy")
@@ -348,27 +351,27 @@ class CopyTests(Base):
 
     @unittest.skipIf(os.name == "nt", "POSIX symbolic links")
     def test_links_and_special_files_are_refused(self):
-        from aepm.copying import copy_tree
+        from clod.copying import copy_tree
         source = self.tree()
         (source / "link").symlink_to(self.root)
-        with self.assertRaisesRegex(AepmError, "unsafe-file"):
+        with self.assertRaisesRegex(ClodError, "unsafe-file"):
             copy_tree(source, self.root / "copy")
 
     @unittest.skipUnless(sys.platform == "darwin", "APFS clones")
     def test_apfs_clone_is_used_on_macos(self):
-        from aepm.copying import copy_file
+        from clod.copying import copy_file
         source = self.root / "original"
         source.write_bytes(os.urandom(100000))
         self.assertEqual(copy_file(source, self.root / "copy"), "clone")
 
     def test_resource_is_copied_once_with_its_digest_checks(self):
-        from aepm.environment import describe_resource, prepare_working_resources, validate_resource
+        from clod.environment import describe_resource, prepare_working_resources, validate_resource
         sdk = self.root / "sdk"
         (sdk / "platform-tools").mkdir(parents=True)
         (sdk / "platform-tools/data").write_bytes(b"s" * 100000)
         resource = describe_resource("androidSdk", sdk, executables=[] if os.name == "nt" else None)
         protocol = self.root / "private/protocol"
-        with patch("aepm.environment.materialize", wraps=__import__("aepm.environment", fromlist=["materialize"]).materialize) as copies:
+        with patch("clod.environment.materialize", wraps=__import__("clod.environment", fromlist=["materialize"]).materialize) as copies:
             prepare_working_resources([resource], protocol)
         self.assertEqual(copies.call_count, 1)
         self.assertEqual((protocol / "android-sdk-working/platform-tools/data").read_bytes(), b"s" * 100000)
@@ -379,7 +382,7 @@ class CopyTests(Base):
 class SeedTests(Base):
     def setUp(self):
         super().setUp()
-        from aepm import seeds
+        from clod import seeds
         self.seeds = seeds
         seeds._STATE.update(root=None, entry=None, fingerprint=None, enabled=True, events=[])
         self.addCleanup(seeds.discard)
@@ -397,7 +400,7 @@ class SeedTests(Base):
         blob = cache / hexdigest[:2] / hexdigest[2:4] / hexdigest[4:]
         blob.parent.mkdir(parents=True)
         blob.write_bytes(content)
-        return root, {"npm_config_cache": str(home / "npm"), "HOME": str(home), "AEPM_PRIVATE_ROOT": str(self.root / name)}, hexdigest
+        return root, {"npm_config_cache": str(home / "npm"), "HOME": str(home), "CLOD_PRIVATE_ROOT": str(self.root / name)}, hexdigest
 
     def test_verified_npm_seed_reaches_the_next_check_only_as_a_private_copy(self):
         root, environment, hexdigest = self.npm_check("first", b"tarball bytes")
@@ -467,7 +470,7 @@ class SeedTests(Base):
         (repository / "hooks").mkdir(exist_ok=True)
         (repository / "hooks/post-checkout").write_text("#!/bin/sh\ntouch " + str(self.root / "hook-ran") + "\n")
         (repository / "hooks/post-checkout").chmod(0o755)
-        return root, {"HOME": str(home), "CFFIXED_USER_HOME": str(home), "AEPM_PRIVATE_ROOT": str(self.root / name)}, repository, revision
+        return root, {"HOME": str(home), "CFFIXED_USER_HOME": str(home), "CLOD_PRIVATE_ROOT": str(self.root / name)}, repository, revision
 
     def loose(self, repository, revision):
         """Unpack the repository's objects so each is its own file, then return the path of the tracked file's blob."""

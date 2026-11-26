@@ -14,7 +14,7 @@ import threading
 from unittest.mock import patch
 
 
-EXPECTED = {"name": "clodhub/video-calls", "version": "0.1.2",
+EXPECTED = {"name": "pkg:clod/com.clodhub/video-calls", "version": "0.1.2",
             "digest": "2acd6afd9cea6a8931717a4793557231bcb2acf999fef8e3ddc3218ec28993e6"}
 SOURCE_DIGEST = "c030d34518c9089d08fc51ff478a0a4b3bd6a80e9a9a62ebef0a4595325cb358"
 CONTEXT_DIGEST = "5414ee4feb104c9d57ba2582c20bebfaa3d1e6793270e5b0a7bdf666a7614af7"
@@ -204,9 +204,9 @@ class PythonSelection:
 
 
 def workload_inputs(root, check):
-    from aepm.environment import validate_resource
-    from aepm.io import load, snapshot
-    from aepm.model import canonical, digest
+    from clod.environment import validate_resource
+    from clod.io import load, snapshot
+    from clod.model import canonical, digest
     from tests import run_android_component_fixture as harness
 
     harness.inputs(root / "android", root / "android-context.json", check)
@@ -234,7 +234,7 @@ class AndroidObserver:
         self.incomplete = True
         name = type(error).__name__ if error is not None else "unavailable"
         item = {"phase": phase[:64], "exception": name if name in
-                ("OSError", "ValueError", "RuntimeError", "AepmError", "PermissionError", "unavailable") else "other"}
+                ("OSError", "ValueError", "RuntimeError", "ClodError", "PermissionError", "unavailable") else "other"}
         if item in self.errors:
             return
         if len(self.errors) < 32:
@@ -334,7 +334,7 @@ class AndroidObserver:
             immediate = c.get_errno()
             try:
                 if entry is not None:
-                    entry["raised"] = type(error).__name__ if type(error).__name__ in ("AepmError", "OSError", "ValueError", "RuntimeError") else "other"
+                    entry["raised"] = type(error).__name__ if type(error).__name__ in ("ClodError", "OSError", "ValueError", "RuntimeError") else "other"
             finally:
                 self.active -= 1
                 self.local.association = previous or {"globalRun": None, "selectedStep": None, "scope": "setup"}
@@ -351,7 +351,7 @@ class AndroidObserver:
                 code, seconds, reason, _output = result
                 require(code is None or type(code) is int and -2147483648 <= code <= 2147483647, "result code")
                 require(type(seconds) is int and 0 <= seconds <= 2147483647, "result duration")
-                from aepm.model import EXECUTION_REASONS
+                from clod.model import EXECUTION_REASONS
                 entry.update(exitCode=code, seconds=seconds, reason=reason if isinstance(reason, str) and reason in EXECUTION_REASONS else "redacted")
         except Exception as error:
             self.error("run-observation", error)
@@ -438,9 +438,9 @@ class AndroidObserver:
 
 
 def harness_evidence(check):
-    from aepm.io import load
-    from aepm.model import digest, sha256
-    from aepm.supervision import validate_log_index
+    from clod.io import load
+    from clod.model import digest, sha256
+    from clod.supervision import validate_log_index
 
     result_path = check / "focused-result.json"
     ordinary(result_path)
@@ -477,10 +477,10 @@ def main(inventory_path, inventory_digest, out):
 
 def execute_bound(inventory_path, inventory_digest, out, selection):
     root = inventory_path.parent
-    from aepm import contextual
-    from aepm.environment import validate_resource
-    from aepm.private_process import DarwinBackend
-    from aepm.supervision import Recorder
+    from clod import contextual
+    from clod.environment import validate_resource
+    from clod.private_process import DarwinBackend
+    from clod.supervision import Recorder
     from tests import run_android_component_fixture as harness
     from tests.discovery_observer import DiscoveryObserver
 

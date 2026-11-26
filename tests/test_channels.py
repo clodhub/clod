@@ -9,10 +9,10 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from aepm.bundle import pack, read_package
-from aepm.io import load, write
-from aepm.model import AepmError, canonical, digest
-from aepm.recipe import World, evaluate
+from clod.bundle import pack, read_package
+from clod.io import load, write
+from clod.model import ClodError, canonical, digest
+from clod.recipe import World, evaluate
 from tests import test_recipe_design as design
 from tests.test_fetch import Catalogue
 from tests.test_recipe_design import LABEL, RECIPE, SLOT_CLASSES, component
@@ -66,7 +66,7 @@ class ChannelTests(unittest.TestCase):
         shutil.copytree(cls.root / "game", source)
         manifest = json.loads((source / "component.json").read_text())
         manifest["identity"]["version"] = number
-        from aepm.channels import channel_of
+        from clod.channels import channel_of
         channel = channel_of(number)
         manifest["release"] = {"channel": channel, "fixes": ["GHSA-game-0001-test"] if channel == "security" else []}
         if extra_class is not None:
@@ -85,7 +85,7 @@ class ChannelTests(unittest.TestCase):
         for ref in json.loads((cls.store / "catalogue.json").read_text())["entries"]:
             manifest, _ = read_package(ref, cls.store)
             kind = "recipes" if manifest["kind"] == "recipe" else "components"
-            short = ref["name"].split("/")[1]
+            short = ref["name"].rsplit("/", 1)[1]
             base = f"/api/{kind}/{short}/{ref['version']}"
             Catalogue.routes[base] = {"name": ref["name"], "version": ref["version"], "digest": "sha256:" + ref["digest"]}
             Catalogue.routes[base + "/bundle"] = {"digest": "sha256:" + ref["digest"], "url": f"{cls.origin}/dl/{ref['digest']}"}
@@ -107,87 +107,87 @@ class ChannelTests(unittest.TestCase):
     def setUp(self):
         self.routes = copy.deepcopy(Catalogue.routes)
         self.addCleanup(setattr, Catalogue, "routes", self.routes)
-        world = World.from_store("clodhub/game", "0.1.0", self.store, {"deck": ("clodhub/deck2", "0.1.0")})
+        world = World.from_store("pkg:clod/com.clodhub/game-recipe", "0.1.0", self.store, {"deck": ("pkg:clod/com.clodhub/deck2", "0.1.0")})
         self.definition = evaluate(world, {})["design"]
         base = Path(self.temp.name).resolve()
         self.app = base / ("app-" + self.id().rsplit(".", 1)[1])
-        write(self.app / ".aepm/definition.json", self.definition)
+        write(self.app / ".clod/definition.json", self.definition)
         self.fresh = base / ("store-" + self.id().rsplit(".", 1)[1])
-        patcher = patch("aepm.application.read_assembly")
+        patcher = patch("clod.application.read_assembly")
         patcher.start()
         self.addCleanup(patcher.stop)
 
     def policy(self, **changes):
         self.definition["updatePolicy"].update(changes)
-        write(self.app / ".aepm/definition.json", self.definition)
+        write(self.app / ".clod/definition.json", self.definition)
 
     def test_outdated_lists_each_channel_from_the_catalogue_alone(self):
-        from aepm.channels import outdated
-        with patch("aepm.fetch.fetch", side_effect=AssertionError("no download")):
+        from clod.channels import outdated
+        with patch("clod.fetch.fetch", side_effect=AssertionError("no download")):
             rows = {row["name"]: row for row in outdated(self.app, self.origin)}
-        self.assertEqual(rows["clodhub/deck2"], {"name": "clodhub/deck2", "installed": "0.1.0", "line": "0.1",
+        self.assertEqual(rows["pkg:clod/com.clodhub/deck2"], {"name": "pkg:clod/com.clodhub/deck2", "installed": "0.1.0", "line": "0.1",
                                                     "policy": self.definition["updatePolicy"],
                                                     "security": {"version": "0.1.1", "fixes": ["GHSA-deck-0001-test"]},
                                                     "features": None, "preview": None})
-        game = rows["clodhub/game"]
+        game = rows["pkg:clod/com.clodhub/game-recipe"]
         self.assertEqual((game["security"], game["features"], game["preview"]),
                          (None, {"version": "0.2.0"}, {"version": "0.3.0-preview.1"}))
 
     def test_security_moves_every_package_on_its_line(self):
-        from aepm.channels import next_definition
+        from clod.channels import next_definition
         nxt, skipped = next_definition(self.app, "security", self.fresh, self.origin)
         self.assertEqual((nxt["recipe"], skipped), (self.definition["recipe"], []))
         versions = {item["name"]: item["version"] for item in nxt["components"]}
-        self.assertEqual((versions["clodhub/deck2"], versions["clodhub/host"]), ("0.1.1", "0.1.1"))
+        self.assertEqual((versions["pkg:clod/com.clodhub/deck2"], versions["pkg:clod/com.clodhub/host"]), ("0.1.1", "0.1.1"))
         self.assertEqual((nxt["selections"]["deck"]["version"], nxt["selections"]["server"]["version"]), ("0.1.1", "0.1.1"))
         self.assertEqual(nxt["updatePolicy"], self.definition["updatePolicy"])
 
     def test_a_security_release_of_another_class_version_is_skipped_with_its_reason(self):
-        from aepm.channels import next_definition
+        from clod.channels import next_definition
         path, entry = next(iter(self.unlisted.items()))
         Catalogue.routes[path]["versions"].append(entry)
         nxt, skipped = next_definition(self.app, "security", self.fresh, self.origin)
-        self.assertEqual({item["name"]: item["version"] for item in nxt["components"]}["clodhub/deck2"], "0.1.0")
-        self.assertEqual([(item["name"], item["version"], item["slot"]) for item in skipped], [("clodhub/deck2", "0.1.2", "deck")])
+        self.assertEqual({item["name"]: item["version"] for item in nxt["components"]}["pkg:clod/com.clodhub/deck2"], "0.1.0")
+        self.assertEqual([(item["name"], item["version"], item["slot"]) for item in skipped], [("pkg:clod/com.clodhub/deck2", "0.1.2", "deck")])
         self.assertTrue(any(reason.startswith("class-") for reason in skipped[0]["reasons"]), skipped)
 
     def test_features_after_security_keeps_the_installed_security_releases(self):
-        from aepm.channels import next_definition
+        from clod.channels import next_definition
         secured, _ = next_definition(self.app, "security", self.fresh, self.origin)
-        write(self.app / ".aepm/definition.json", secured)
+        write(self.app / ".clod/definition.json", secured)
         nxt, _ = next_definition(self.app, "features", self.fresh, self.origin)
         self.assertEqual(nxt["recipe"]["version"], "0.2.0")
         versions = {item["name"]: item["version"] for item in nxt["components"]}
-        self.assertEqual((versions["clodhub/deck2"], versions["clodhub/host"]), ("0.1.1", "0.1.1"))
+        self.assertEqual((versions["pkg:clod/com.clodhub/deck2"], versions["pkg:clod/com.clodhub/host"]), ("0.1.1", "0.1.1"))
         self.assertEqual((nxt["selections"]["deck"]["version"], nxt["selections"]["server"]["version"]), ("0.1.1", "0.1.1"))
 
     def test_features_keeps_answers_and_substitutes(self):
-        from aepm.channels import next_definition
+        from clod.channels import next_definition
         self.policy(features="manual")
         nxt, _ = next_definition(self.app, "features", self.fresh, self.origin)
         self.assertEqual(nxt["recipe"]["version"], "0.2.0")
-        self.assertEqual({item["id"]: item["name"] for item in nxt["components"]}["deck"], "clodhub/deck2")
+        self.assertEqual({item["id"]: item["name"] for item in nxt["components"]}["deck"], "pkg:clod/com.clodhub/deck2")
 
     def test_a_substitute_that_no_longer_fits_stops_the_preview_proposal(self):
-        from aepm.channels import next_definition
+        from clod.channels import next_definition
         self.policy(preview="manual")
-        with self.assertRaises(AepmError) as raised:
+        with self.assertRaises(ClodError) as raised:
             next_definition(self.app, "preview", self.fresh, self.origin)
         self.assertEqual((raised.exception.code, raised.exception.path), ("substitute-unfit", "deck"))
 
     def test_held_channel_and_mismatched_releases_are_refused(self):
-        from aepm.channels import next_definition
-        with self.assertRaises(AepmError) as raised:
+        from clod.channels import next_definition
+        with self.assertRaises(ClodError) as raised:
             next_definition(self.app, "preview", self.fresh, self.origin)
         self.assertEqual(raised.exception.code, "channel-held")
         listing = Catalogue.routes["/api/components/deck2/latest"]
         entry = next(item for item in listing["versions"] if item["version"] == "0.1.1")
         entry["fixes"] = ["GHSA-other-0002-test"]
-        with self.assertRaises(AepmError) as raised:
+        with self.assertRaises(ClodError) as raised:
             next_definition(self.app, "security", self.fresh, self.origin)
         self.assertEqual(raised.exception.code, "release-channel")
         entry.update(channel="features", fixes=[])
-        with self.assertRaises(AepmError) as raised:
+        with self.assertRaises(ClodError) as raised:
             next_definition(self.app, "security", self.fresh, self.origin)
         self.assertEqual(raised.exception.code, "release-channel")
 
@@ -214,16 +214,16 @@ class RecipeSecurityTests(unittest.TestCase):
         cls.serve()
 
     def test_a_recipe_release_that_leaves_a_slot_unfit_is_skipped(self):
-        from aepm.channels import next_definition
-        with self.assertRaises(AepmError) as raised:
+        from clod.channels import next_definition
+        with self.assertRaises(ClodError) as raised:
             next_definition(self.app, "security", self.fresh, self.origin)
         self.assertEqual(raised.exception.code, "no-update")
         [entry] = raised.exception.detail["skipped"]
-        self.assertEqual((entry["name"], entry["version"], entry["slot"]), ("clodhub/game", "0.1.1", "deck"))
+        self.assertEqual((entry["name"], entry["version"], entry["slot"]), ("pkg:clod/com.clodhub/game-recipe", "0.1.1", "deck"))
         self.assertTrue(any(reason.startswith("class-") for reason in entry["reasons"]), entry)
 
     def test_component_releases_still_move_against_the_installed_recipe(self):
-        from aepm.channels import next_definition
+        from clod.channels import next_definition
         manifest = component(self.root / "host-security", "host", collect=design.HOST_SETTINGS, profiles=design.HOST_PROFILES)
         manifest["identity"]["version"] = "0.1.1"
         manifest["release"] = {"channel": "security", "fixes": ["CVE-2026-0001"]}
@@ -236,8 +236,8 @@ class RecipeSecurityTests(unittest.TestCase):
         Catalogue.routes["/api/components/host/latest"]["versions"].append({"version": "0.1.1", **manifest["release"]})
         nxt, skipped = next_definition(self.app, "security", self.fresh, self.origin)
         self.assertEqual(nxt["recipe"]["version"], "0.1.0")
-        self.assertEqual({item["name"]: item["version"] for item in nxt["components"]}["clodhub/host"], "0.1.1")
-        self.assertEqual([(item["name"], item["slot"]) for item in skipped], [("clodhub/game", "deck")])
+        self.assertEqual({item["name"]: item["version"] for item in nxt["components"]}["pkg:clod/com.clodhub/host"], "0.1.1")
+        self.assertEqual([(item["name"], item["slot"]) for item in skipped], [("pkg:clod/com.clodhub/game-recipe", "deck")])
 
 
 if __name__ == "__main__":

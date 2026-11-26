@@ -6,11 +6,11 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from aepm import contextual
-from aepm.contextual import SuiteBudget, prerequisites
-from aepm.environment import Execution, describe_resource
-from aepm.io import write
-from aepm.model import AepmError, digest
+from clod import contextual
+from clod.contextual import SuiteBudget, prerequisites
+from clod.environment import Execution, describe_resource
+from clod.io import write
+from clod.model import ClodError, digest
 
 import os
 if os.name == "nt":
@@ -35,14 +35,14 @@ class Authority:
     def check_time(self):
         self.checks += 1
         if self.clock.wall >= self.authorization["expiresAt"]:
-            raise AepmError("authorization-expired", "authorization")
+            raise ClodError("authorization-expired", "authorization")
 
 
 class DiscoveryBudgetTests(unittest.TestCase):
     def test_fractional_authority_and_original_start_restriction(self):
         clock = Clock()
         authority = Authority(clock, 1000.25)
-        with patch("aepm.contextual.time.monotonic", side_effect=lambda: clock.mono), patch("aepm.contextual.time.time", side_effect=lambda: clock.wall):
+        with patch("clod.contextual.time.monotonic", side_effect=lambda: clock.mono), patch("clod.contextual.time.time", side_effect=lambda: clock.wall):
             budget = SuiteBudget(30, authority)
             self.assertEqual(budget.remaining(20), .25)
             budget = SuiteBudget(30)
@@ -50,7 +50,7 @@ class DiscoveryBudgetTests(unittest.TestCase):
             budget.restrict(10)
             self.assertEqual(budget.remaining(), 5)
             clock.advance(5)
-            with self.assertRaisesRegex(AepmError, "timeout"):
+            with self.assertRaisesRegex(ClodError, "timeout"):
                 budget.remaining()
 
     def nested_fixture(self, root):
@@ -62,7 +62,7 @@ class DiscoveryBudgetTests(unittest.TestCase):
         write(protocol / "ownership/created-0.json", {"kind": "apple-device", "runId": "a" * 64, "resourceId": "owned-device"})
         suite = {"requirements": ["external:compatible-apple-simulator"], "timeoutSeconds": 30}
         descriptor = {"runId": "a" * 64, "settings": {"applePlatform": "ios-simulator", "appleRuntime": "runtime", "appleDeviceType": "device"}}
-        environment = {"PATH": "/fixture", "AEPM_CONTEXT_FILE": str(protocol / "context.json"), "AEPM_OWNERSHIP_DIRECTORY": str(protocol / "ownership")}
+        environment = {"PATH": "/fixture", "CLOD_CONTEXT_FILE": str(protocol / "context.json"), "CLOD_OWNERSHIP_DIRECTORY": str(protocol / "ownership")}
         return suite, descriptor, environment
 
     def test_nested_project_scheme_probes_share_one_budget(self):
@@ -84,9 +84,9 @@ class DiscoveryBudgetTests(unittest.TestCase):
                     return 0, 1, "", b"{ id: owned-device, name: fixture }"
                 return 0, 1, "", json.dumps(value).encode()
 
-            with patch("aepm.contextual.time.monotonic", side_effect=lambda: clock.mono), patch("aepm.contextual.shutil.which", return_value="/fixture/tool"), patch("aepm.contextual.run", response):
+            with patch("clod.contextual.time.monotonic", side_effect=lambda: clock.mono), patch("clod.contextual.shutil.which", return_value="/fixture/tool"), patch("clod.contextual.run", response):
                 budget = SuiteBudget(3.5)
-                with self.assertRaisesRegex(AepmError, "discovery-timeout"):
+                with self.assertRaisesRegex(ClodError, "discovery-timeout"):
                     prerequisites(suite, descriptor, [], root, environment, {"xcodebuild": "27.2"}, final=True, budget=budget)
             self.assertEqual([timeout for _, timeout in calls], [3.5, 2.5, 1.5, .5])
             self.assertEqual(sum("-showdestinations" in argv for argv, _ in calls), 1)
@@ -104,8 +104,8 @@ class DiscoveryBudgetTests(unittest.TestCase):
                 value = {"runtimes": [{"identifier": "runtime", "isAvailable": True}]} if "runtimes" in argv else {"devicetypes": [{"identifier": "device"}]}
                 return 0, 1, "", json.dumps(value).encode()
 
-            with patch("aepm.contextual.time.monotonic", side_effect=lambda: clock.mono), patch("aepm.contextual.time.time", side_effect=lambda: clock.wall), patch("aepm.contextual.shutil.which", return_value="/fixture/tool"), patch("aepm.contextual.run", response):
-                with self.assertRaisesRegex(AepmError, "authorization-expired"):
+            with patch("clod.contextual.time.monotonic", side_effect=lambda: clock.mono), patch("clod.contextual.time.time", side_effect=lambda: clock.wall), patch("clod.contextual.shutil.which", return_value="/fixture/tool"), patch("clod.contextual.run", response):
+                with self.assertRaisesRegex(ClodError, "authorization-expired"):
                     prerequisites(suite, descriptor, [], root, environment, {"xcodebuild": "27.2"}, final=True, budget=SuiteBudget(30, authority))
             self.assertEqual(len(calls), 2)
             self.assertGreaterEqual(authority.checks, len(calls))
@@ -137,8 +137,8 @@ class DiscoveryBudgetTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root, clock = Path(directory).resolve(), Clock()
             suite, descriptor, environment, calls, response = self.final_probe(root, clock)
-            with patch("aepm.contextual.time.monotonic", side_effect=lambda: clock.mono), patch("aepm.contextual.shutil.which", return_value="/fixture/tool"), patch("aepm.contextual.run", response):
-                with self.assertRaisesRegex(AepmError, "discovery-timeout"):
+            with patch("clod.contextual.time.monotonic", side_effect=lambda: clock.mono), patch("clod.contextual.shutil.which", return_value="/fixture/tool"), patch("clod.contextual.run", response):
+                with self.assertRaisesRegex(ClodError, "discovery-timeout"):
                     prerequisites(suite, descriptor, [], root, environment, {"xcodebuild": "27.2"}, final=True, budget=SuiteBudget(30))
             self.assertEqual(len(calls), 4)
             self.assertIn("-showdestinations", calls[-1][0])
@@ -150,8 +150,8 @@ class DiscoveryBudgetTests(unittest.TestCase):
                 root, clock = Path(directory).resolve(), Clock()
                 suite, descriptor, environment, calls, response = self.final_probe(root, clock, expires=True, candidate=candidate)
                 authority = Authority(clock, 1004.5)
-                with patch("aepm.contextual.time.monotonic", side_effect=lambda: clock.mono), patch("aepm.contextual.time.time", side_effect=lambda: clock.wall), patch("aepm.contextual.shutil.which", return_value="/fixture/tool"), patch("aepm.contextual.run", response):
-                    with self.assertRaisesRegex(AepmError, "authorization-expired"):
+                with patch("clod.contextual.time.monotonic", side_effect=lambda: clock.mono), patch("clod.contextual.time.time", side_effect=lambda: clock.wall), patch("clod.contextual.shutil.which", return_value="/fixture/tool"), patch("clod.contextual.run", response):
+                    with self.assertRaisesRegex(ClodError, "authorization-expired"):
                         prerequisites(suite, descriptor, [], root, environment, {"xcodebuild": "27.2"}, final=True, budget=SuiteBudget(30, authority))
                 self.assertEqual(len(calls), 4)
                 self.assertIn("-showdestinations", calls[-1][0])
@@ -191,7 +191,7 @@ class DiscoveryBudgetTests(unittest.TestCase):
                 commands.append(argv)
                 return 0, 1, "", b"Python 3.12.8\n" if "--version" in argv else b""
 
-            with patch("aepm.contextual.time.monotonic", side_effect=lambda: clock.mono), patch("aepm.contextual.run", response), patch("aepm.contextual.validate_resource", revalidate):
+            with patch("clod.contextual.time.monotonic", side_effect=lambda: clock.mono), patch("clod.contextual.run", response), patch("clod.contextual.validate_resource", revalidate):
                 result, record = contextual.execute(suite, source, False, root / "logs", execution)
             self.assertEqual(len(checks), 2)
             self.assertEqual(result["exitCode"], 0)

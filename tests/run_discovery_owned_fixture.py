@@ -14,25 +14,25 @@ PYTHON = Path("/Users/george/.pyenv/versions/3.12.8/bin/python3.12")
 PYTHON_DIGEST = "3aa83eb80ce0ce80172b911f97f561f2b79057f99e2c00a673c3ac2297bb09fd"
 OUTPUT = Path("/private/var/folders/yk/8tzc9b_1713dlhdp5vzkgg100000gn/T/opencode/discovery-owned-exec-01")
 BINDINGS = {
-    "aepm/__init__.py": "f4dfd4dfbbbebfd7a4457428fe9e4c618064b680ccda07e60a936c3894c4730d",
-    "aepm/__main__.py": "8cacb7b5e9ed795b5793edf3314cb86100606e728235f38429514344ff79b3f7",
-    "aepm/application.py": "b467a4021548a0d7bcd43408cb6dd38c3b329a399b5ba39d29349e6f102f3b4f",
-    "aepm/authorization.py": "bc29be5c15e92a882a01da71e980a0f149aa6a51a129eb33a7e55a812c7eda58",
-    "aepm/bundle.py": "10e57809228d0356dfcd8e254fedf4259cb176b6c3d5de7ae43544fffc1adc4a",
-    "aepm/contextual.py": "e21b27f4231e3676466676e3bb751a3a770703b15aea6d010e15c415061c60e7",
-    "aepm/environment.py": "9c0b699727824683ce2c179cdd93d18cb8ada695e0ac59d0b30796402e7e5356",
-    "aepm/export.py": "c4e07b6e4fd4f794594a28c5acdfde182423be30834fdb2bf30972ac43dbca5d",
-    "aepm/io.py": "361721a8b9bfdfa5c6cbb3b3830240981da365b573b6e53712ca9fc3ceeb418d",
-    "aepm/model.py": "4ec3f9e0174ab015c536effb093a75ff3ed11e772f4b10f93c40868a57c05b96",
-    "aepm/posix_process.py": "395db715742ebc844d22cc9eab38dcf7e55fff6d58da336d816f179aa2fbdcda",
-    "aepm/private_process.py": "73b313f1d0029165c47cf7b0ee8df6de079be3c4e76b09bcd6e347064375bb50",
-    "aepm/process.py": "0cced9faa9160c36649247a927471dae6583790b34ba82c6dc9c5ba5807be075",
-    "aepm/supervision.py": "70a0d7b5461f7549079fe9e948c6599c8eb01430351b0a19690d5518aaef2b78",
-    "aepm/test_identities.py": "a0a1e696f689b0a3ff40c54a26b833eb6d57566daef1c98df6c6d8849b372c0a",
-    "aepm/trust.py": "c2b6a696dce81e8897a96a6bbdec4dca37f7035605fc8ea8a8f5e68df872df8d",
-    "aepm/update.py": "c332cda135921238967ea4ca6fdc721d4aa014c5e93e1dc9cb75a756d55bd736",
-    "aepm/verification.py": "0c150ee403976ca58e9d49a6ba4f390400edffbf22ad44c92b002cf98c493cdf",
-    "aepm/windows.py": "f68e616f6c84f86a6ec853ed7910cf27f07fe26064b09292c5c65aa0bfddc33b",
+    "clod/__init__.py": "f4dfd4dfbbbebfd7a4457428fe9e4c618064b680ccda07e60a936c3894c4730d",
+    "clod/__main__.py": "8cacb7b5e9ed795b5793edf3314cb86100606e728235f38429514344ff79b3f7",
+    "clod/application.py": "b467a4021548a0d7bcd43408cb6dd38c3b329a399b5ba39d29349e6f102f3b4f",
+    "clod/authorization.py": "bc29be5c15e92a882a01da71e980a0f149aa6a51a129eb33a7e55a812c7eda58",
+    "clod/bundle.py": "10e57809228d0356dfcd8e254fedf4259cb176b6c3d5de7ae43544fffc1adc4a",
+    "clod/contextual.py": "e21b27f4231e3676466676e3bb751a3a770703b15aea6d010e15c415061c60e7",
+    "clod/environment.py": "9c0b699727824683ce2c179cdd93d18cb8ada695e0ac59d0b30796402e7e5356",
+    "clod/export.py": "c4e07b6e4fd4f794594a28c5acdfde182423be30834fdb2bf30972ac43dbca5d",
+    "clod/io.py": "361721a8b9bfdfa5c6cbb3b3830240981da365b573b6e53712ca9fc3ceeb418d",
+    "clod/model.py": "4ec3f9e0174ab015c536effb093a75ff3ed11e772f4b10f93c40868a57c05b96",
+    "clod/posix_process.py": "395db715742ebc844d22cc9eab38dcf7e55fff6d58da336d816f179aa2fbdcda",
+    "clod/private_process.py": "73b313f1d0029165c47cf7b0ee8df6de079be3c4e76b09bcd6e347064375bb50",
+    "clod/process.py": "0cced9faa9160c36649247a927471dae6583790b34ba82c6dc9c5ba5807be075",
+    "clod/supervision.py": "70a0d7b5461f7549079fe9e948c6599c8eb01430351b0a19690d5518aaef2b78",
+    "clod/test_identities.py": "a0a1e696f689b0a3ff40c54a26b833eb6d57566daef1c98df6c6d8849b372c0a",
+    "clod/trust.py": "c2b6a696dce81e8897a96a6bbdec4dca37f7035605fc8ea8a8f5e68df872df8d",
+    "clod/update.py": "c332cda135921238967ea4ca6fdc721d4aa014c5e93e1dc9cb75a756d55bd736",
+    "clod/verification.py": "0c150ee403976ca58e9d49a6ba4f390400edffbf22ad44c92b002cf98c493cdf",
+    "clod/windows.py": "f68e616f6c84f86a6ec853ed7910cf27f07fe26064b09292c5c65aa0bfddc33b",
     "tests/discovery_observer.py": "facb05280dc1b5fdae6e691d0175cbc5a7ff6a9d320de4b251f4e9c4684f97c9",
     "tests/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
 }
@@ -188,10 +188,10 @@ def main(expected_controller):
                "sourceBefore": before, "python": str(PYTHON), "pythonDigest": PYTHON_DIGEST,
                "attachmentScope": "post-construction-existing-calls", "constructorChecksObserved": False}
     write(OUTPUT / "state.json", {"phase": "prepared", **summary})
-    from aepm.contextual import tool_environment
-    from aepm.private_process import DarwinBackend, enroll_root
-    from aepm.process import run
-    from aepm.supervision import Recorder
+    from clod.contextual import tool_environment
+    from clod.private_process import DarwinBackend, enroll_root
+    from clod.process import run
+    from clod.supervision import Recorder
     from tests.discovery_observer import DiscoveryObserver
 
     observers, attachment_errors, results = [], [], {}

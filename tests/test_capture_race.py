@@ -14,10 +14,10 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 
-from aepm import process
-from aepm.model import AepmError
-from aepm.private_process import CaptureRace, DarwinBackend, Identity, PrivateScope, enroll_root
-from aepm.supervision import Recorder
+from clod import process
+from clod.model import ClodError
+from clod.private_process import CaptureRace, DarwinBackend, Identity, PrivateScope, enroll_root
+from clod.supervision import Recorder
 from tests.test_discovery_observer import FakeBindings
 from tests.test_private_process import FakeBackend
 
@@ -54,8 +54,8 @@ class Guarded(unittest.TestCase):
         self.root = Path(temporary.name).resolve()
 
     def scope(self, backend, recorder=None):
-        with patch("aepm.private_process.DarwinBackend", return_value=backend), \
-                patch("aepm.private_process.LinuxBackend", return_value=backend):
+        with patch("clod.private_process.DarwinBackend", return_value=backend), \
+                patch("clod.private_process.LinuxBackend", return_value=backend):
             scope = PrivateScope(self.root, diagnostics=recorder)
         self.addCleanup(scope.close)
         return scope
@@ -64,10 +64,10 @@ class Guarded(unittest.TestCase):
 class BackendCaptureTests(Guarded):
     def capture(self, modes):
         fake = FakeBindings(modes)
-        with patch("aepm.private_process.time.sleep", side_effect=AssertionError("no sleep")):
+        with patch("clod.private_process.time.sleep", side_effect=AssertionError("no sleep")):
             try:
                 return fake, fake.backend.capture(424242), None
-            except AepmError as error:
+            except ClodError as error:
                 return fake, None, error
 
     def test_homogeneous_races_raise_capture_race_with_unchanged_code(self):
@@ -75,7 +75,7 @@ class BackendCaptureTests(Guarded):
             with self.subTest(mode=mode):
                 fake, _, error = self.capture((mode,))
                 self.assertIsInstance(error, CaptureRace)
-                self.assertIsInstance(error, AepmError)
+                self.assertIsInstance(error, ClodError)
                 self.assertEqual((error.code, error.path), ("cleanup-failed", "private-process-discovery"))
                 outer = [call for call in fake.calls if call[0] == "identity"]
                 self.assertEqual(len(outer), 4)
@@ -118,7 +118,7 @@ class BackendCaptureTests(Guarded):
                                ("proc_signal_with_audittoken", Mock(side_effect=AssertionError("signal")))):
             setattr(library, name, lambda *args, function=function: function(*args))
         setattr(library, "__proc_info_extended_id", lambda *args: fake.extended(*args))
-        with patch("aepm.private_process.c.CDLL", return_value=library), self.assertRaises(AepmError) as caught:
+        with patch("clod.private_process.c.CDLL", return_value=library), self.assertRaises(ClodError) as caught:
             DarwinBackend()
         self.assertEqual((caught.exception.code, caught.exception.path), ("cleanup-failed", "private-process-discovery"))
 
@@ -165,7 +165,7 @@ class EnrollmentRecheckTests(Guarded):
     def setUp(self):
         super().setUp()
         self.clock = Clock()
-        guard = patch("aepm.private_process.time", self.clock)
+        guard = patch("clod.private_process.time", self.clock)
         guard.start()
         self.addCleanup(guard.stop)
 
@@ -177,7 +177,7 @@ class EnrollmentRecheckTests(Guarded):
         return self.scope(scripted)
 
     def assert_race(self, action):
-        with self.assertRaises(AepmError) as caught:
+        with self.assertRaises(ClodError) as caught:
             action()
         self.assertIsInstance(caught.exception, CaptureRace)
         self.assertEqual((caught.exception.code, caught.exception.path), ("cleanup-failed", "private-process-discovery"))
@@ -193,7 +193,7 @@ class EnrollmentRecheckTests(Guarded):
     def test_resolved_in_root_candidate_still_conflicts(self):
         inside = Identity(200, 200, os.geteuid(), 1, 999, 2, "/outside/program", str(self.root))
         backend = ScriptedBackend({200: unrelated(200)}, {200: ["race", inside]})
-        with self.assertRaises(AepmError) as caught:
+        with self.assertRaises(ClodError) as caught:
             self.enroll(backend)
         self.assertEqual(caught.exception.path, "private-process-conflict")
 
@@ -214,9 +214,9 @@ class EnrollmentRecheckTests(Guarded):
         self.assertEqual(backend.signals, [])
 
     def test_other_failure_during_recheck_keeps_its_location(self):
-        denied = AepmError("cleanup-failed", "private-process-path")
+        denied = ClodError("cleanup-failed", "private-process-path")
         backend = ScriptedBackend({200: unrelated(200)}, {200: ["race", denied]})
-        with self.assertRaises(AepmError) as caught:
+        with self.assertRaises(ClodError) as caught:
             self.enroll(backend)
         self.assertEqual(caught.exception.path, "private-process-path")
 
@@ -232,7 +232,7 @@ class EnrollmentRecheckTests(Guarded):
 
     def test_constructor_resolved_in_root_candidate_conflicts(self):
         inside = Identity(200, 200, os.geteuid(), 1, 999, 2, "/outside/program", str(self.root))
-        with self.assertRaises(AepmError) as caught:
+        with self.assertRaises(ClodError) as caught:
             self.constructed(ScriptedBackend({200: unrelated(200)}, {200: ["race", inside]}))
         self.assertEqual(caught.exception.path, "private-process-conflict")
 
@@ -310,7 +310,7 @@ class ScopeRaceTests(Guarded):
         backend = RacingBackend({})
         scope = self.scope(backend, recorder)
         scope.bind(300)
-        backend.pids = Mock(side_effect=AepmError("cleanup-failed", "private-process-discovery"))
+        backend.pids = Mock(side_effect=ClodError("cleanup-failed", "private-process-discovery"))
         self.assertFalse(scope.finish(time.monotonic() + .2))
         self.assertTrue(scope.failed)
         observation = recorder.failure["observation"]
@@ -334,7 +334,7 @@ class ScopeRaceTests(Guarded):
         messages.get.side_effect = [(0, b""), (1, b"")]
         thread = Mock()
         thread.is_alive.return_value = False
-        with patch("aepm.posix_process.ContainedProcess", return_value=instance), \
+        with patch("clod.posix_process.ContainedProcess", return_value=instance), \
                 patch.object(process.threading, "Thread", return_value=thread), \
                 patch.object(process.queue, "Queue", return_value=messages):
             code, _, reason, _ = process.run(["fixture"], self.root, {}, 10)

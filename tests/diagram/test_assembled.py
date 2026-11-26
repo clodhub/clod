@@ -4,9 +4,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from aepm.application import projected_definition
-from aepm.diagram import generate as renderer
-from aepm.model import AepmError
+from clod.application import projected_definition
+from clod.diagram import generate as renderer
+from clod.model import ClodError
 from tests.diagram.test_generate import design
 
 
@@ -15,7 +15,7 @@ class AssembledDiagramTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "visual.json").write_text("{}")
-            with self.assertRaisesRegex(AepmError, "diagram-definition"):
+            with self.assertRaisesRegex(ClodError, "diagram-definition"):
                 projected_definition({"visual": {"definition": "visual.json"}}, root, {})
 
     def document(self):
@@ -55,13 +55,13 @@ class OptionalPortTests(unittest.TestCase):
             renderer.validate_design(value)
 
     def test_projected_port_follows_manifest_optional_flag(self):
-        base = {"id": "clodhub.sample", "name": "Sample", "kind": "component", "status": "example", "package": "clodhub/sample",
+        base = {"id": "com.clodhub.sample", "name": "Sample", "kind": "component", "status": "example", "package": "pkg:clod/com.clodhub/sample",
                 "version": "0.1.0", "settings": [],
-                "ports": [{"id": "rules", "name": "Rules", "direction": "input", "kind": "interface", "type": "ae/contract",
+                "ports": [{"id": "rules", "name": "Rules", "direction": "input", "kind": "interface", "type": "com.clodhub/contract",
                            "version": "1.0.0", "required": False, "cardinality": "one"}]}
         manifest = {"kind": "component", "visual": {"definition": "visual.json"}, "collect": [], "provides": [],
-                    "requires": [{"id": "rules", "type": "ae/contract", "version": "1.0.0", "path": "interface.txt"}]}
-        ref = {"name": "clodhub/sample", "version": "0.1.0", "digest": "a" * 64}
+                    "requires": [{"id": "rules", "type": "com.clodhub/contract", "version": "1.0.0", "path": "interface.txt"}]}
+        ref = {"name": "pkg:clod/com.clodhub/sample", "version": "0.1.0", "digest": "a" * 64}
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "visual.json").write_text(json.dumps(base))
@@ -70,7 +70,7 @@ class OptionalPortTests(unittest.TestCase):
             self.assertFalse(projected_definition(manifest, root, ref)["ports"][0]["required"])
             base["ports"][0]["required"] = True
             (root / "visual.json").write_text(json.dumps(base))
-            with self.assertRaisesRegex(AepmError, "diagram-interface"):
+            with self.assertRaisesRegex(ClodError, "diagram-interface"):
                 projected_definition(manifest, root, ref)
             manifest["requires"][0]["optional"] = False
             self.assertTrue(projected_definition(manifest, root, ref)["ports"][0]["required"])

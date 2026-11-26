@@ -5,9 +5,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from aepm.host_tools import host_tool, version_matches
-from aepm.model import AepmError, validate_component
-from aepm.verification import execution_environment
+from clod.host_tools import host_tool, version_matches
+from clod.model import ClodError, validate_component
+from clod.verification import execution_environment
 from tests.core.test_core import fixture
 
 if os.name == "nt":
@@ -47,7 +47,7 @@ class HostToolTests(unittest.TestCase):
         (self.root / ".pyenv/bin/pyenv").write_text("#!/bin/sh\nexit 1\n")
         self.assertIsNone(host_tool("python3", self.path))
         (self.root / ".pyenv/bin/pyenv").unlink()
-        with patch("aepm.host_tools.shutil.which", side_effect=lambda name, path=None:
+        with patch("clod.host_tools.shutil.which", side_effect=lambda name, path=None:
                    str(self.root / ".pyenv/shims/python3") if name == "python3" else None):
             self.assertIsNone(host_tool("python3"))
 
@@ -73,7 +73,7 @@ class HostToolTests(unittest.TestCase):
         for pin in ("v3", "3.x", "03.1", "", "3.12-rc", "3.12.8.1"):
             changed = copy.deepcopy(component)
             changed["verification"][0]["tools"] = {"python3": pin}
-            with self.subTest(pin=pin), self.assertRaises(AepmError) as caught:
+            with self.subTest(pin=pin), self.assertRaises(ClodError) as caught:
                 validate_component(changed)
             self.assertEqual(caught.exception.code, "invalid-tool-version")
 

@@ -2,7 +2,7 @@ import json
 import struct
 import unittest
 
-from aepm.model import AepmError, canonical, loads
+from clod.model import ClodError, canonical, loads
 
 # RFC 8785 Appendix B: IEEE 754 binary64 bit patterns and their canonical text.
 APPENDIX_B = [
@@ -36,7 +36,7 @@ class CanonicalTests(unittest.TestCase):
 
     def test_appendix_b_nan_and_infinity_refused(self):
         for bits in APPENDIX_B_INVALID:
-            with self.subTest(bits=bits), self.assertRaises(AepmError):
+            with self.subTest(bits=bits), self.assertRaises(ClodError):
                 canonical(double(bits))
 
     def test_section_3_2_2_example(self):
@@ -64,16 +64,16 @@ class CanonicalTests(unittest.TestCase):
     def test_safe_integer_range(self):
         self.assertEqual(canonical([2 ** 53 - 1, -(2 ** 53 - 1)]), b"[9007199254740991,-9007199254740991]")
         for value in (2 ** 53, -(2 ** 53), 10 ** 20):
-            with self.subTest(value=value), self.assertRaises(AepmError) as caught:
+            with self.subTest(value=value), self.assertRaises(ClodError) as caught:
                 canonical({"n": value})
             self.assertEqual(caught.exception.code, "invalid-number")
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             loads(b'{"n":9007199254740992}')
 
     def test_strings_and_refusals(self):
         self.assertEqual(canonical("\u2028\x7f\x1f"), '"\u2028\x7f\\u001f"'.encode())
         for value in ("\ud800", {1: "key"}, (1, 2), b"bytes"):
-            with self.subTest(value=value), self.assertRaises(AepmError):
+            with self.subTest(value=value), self.assertRaises(ClodError):
                 canonical(value)
 
 

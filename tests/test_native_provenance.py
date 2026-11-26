@@ -8,11 +8,11 @@ import tempfile
 import unittest
 import zipfile
 
-from aepm.bom import bill_of_materials
-from aepm.bundle import pack, read_package
-from aepm.foundations import validate_graph, validate_package_foundations
-from aepm.io import load, write
-from aepm.model import AepmError, canonical, digest, validate_component
+from clod.bom import bill_of_materials
+from clod.bundle import pack, read_package
+from clod.foundations import validate_graph, validate_package_foundations
+from clod.io import load, write
+from clod.model import ClodError, canonical, digest, validate_component
 from tests.core.test_core import fixture
 
 FIXTURES = Path(__file__).parent / "fixtures/native"
@@ -99,7 +99,7 @@ class NativeProvenanceTests(unittest.TestCase):
             document = deepcopy(original)
             change(document["pins"][0])
             upstream["delivery"]["digest"] = self.add_file(upstream["delivery"]["lock"], canonical(document))
-            with self.assertRaisesRegex(AepmError, "upstream-lock-pin"):
+            with self.assertRaisesRegex(ClodError, "upstream-lock-pin"):
                 self.check()
 
     def test_swift_branch_duplicate_and_unknown_format_reject(self):
@@ -110,16 +110,16 @@ class NativeProvenanceTests(unittest.TestCase):
             document = deepcopy(original)
             change(document)
             upstream["delivery"]["digest"] = self.add_file(upstream["delivery"]["lock"], canonical(document))
-            with self.assertRaises(AepmError):
+            with self.assertRaises(ClodError):
                 self.check()
 
     def test_swift_lock_bytes_and_missing_notice_reject(self):
         upstream = self.swift()
         self.add_file(upstream["delivery"]["lock"], b"{}")
-        with self.assertRaisesRegex(AepmError, "upstream-lock-digest"):
+        with self.assertRaisesRegex(ClodError, "upstream-lock-digest"):
             self.check()
         upstream["notices"] = ["missing"]
-        with self.assertRaisesRegex(AepmError, "upstream-notice-missing"):
+        with self.assertRaisesRegex(ClodError, "upstream-notice-missing"):
             validate_component(self.manifest)
 
     def test_real_gradle_coordinate_checksums_pack_and_bom(self):
@@ -129,18 +129,18 @@ class NativeProvenanceTests(unittest.TestCase):
         read_package(ref, self.store)
         document = bill_of_materials(ref, self.store)
         imported = next(item for item in document["components"] if item.get("purl", "").startswith("pkg:maven/"))
-        self.assertIn({"name": "aepm:upstream:revision-status", "value": "unavailable"}, imported["properties"])
-        self.assertFalse(any(item["name"] == "aepm:upstream:revision" for item in imported["properties"]))
+        self.assertIn({"name": "clod:upstream:revision-status", "value": "unavailable"}, imported["properties"])
+        self.assertFalse(any(item["name"] == "clod:upstream:revision" for item in imported["properties"]))
 
     def test_gradle_configuration_and_coordinate_bind(self):
         upstream = self.gradle()
         upstream["delivery"]["configurations"] = ["missingConfiguration"]
-        with self.assertRaisesRegex(AepmError, "upstream-lock-pin"):
+        with self.assertRaisesRegex(ClodError, "upstream-lock-pin"):
             self.check()
         upstream["delivery"]["configurations"] = ["debugCompileClasspath"]
         upstream["version"] = "2.29.1"
         upstream["purl"] = "pkg:maven/io.livekit/livekit-android@2.29.1"
-        with self.assertRaisesRegex(AepmError, "upstream-lock-pin"):
+        with self.assertRaisesRegex(ClodError, "upstream-lock-pin"):
             self.check()
 
     def test_gradle_same_module_different_configuration_versions_allowed(self):
@@ -152,7 +152,7 @@ class NativeProvenanceTests(unittest.TestCase):
             {"name": "annotation-1.3.0.module", "digest": "9516c2ae44284ea0bd3d0eade0ee638879b708cbe31e3af92ba96c300604ebc3"}]
         self.check()
         upstream["delivery"]["configurations"].append("debugCompileClasspath")
-        with self.assertRaisesRegex(AepmError, "upstream-lock-pin"):
+        with self.assertRaisesRegex(ClodError, "upstream-lock-pin"):
             self.check()
 
     def test_gradle_duplicate_configuration_coordinate_rejects(self):
@@ -160,7 +160,7 @@ class NativeProvenanceTests(unittest.TestCase):
         path = upstream["delivery"]["lock"]
         raw = (self.source / path).read_bytes() + b"io.livekit:livekit-android:2.29.1=debugCompileClasspath\n"
         upstream["delivery"]["digest"] = self.add_file(path, raw)
-        with self.assertRaisesRegex(AepmError, "upstream-lock-duplicate"):
+        with self.assertRaisesRegex(ClodError, "upstream-lock-duplicate"):
             self.check()
 
     def test_gradle_lock_and_metadata_byte_tampering_reject(self):
@@ -172,7 +172,7 @@ class NativeProvenanceTests(unittest.TestCase):
                 path, expected = upstream["delivery"]["verification"].values()
             original = (self.source / path).read_bytes()
             self.add_file(path, original + b" ")
-            with self.subTest(key=key), self.assertRaisesRegex(AepmError, "upstream-lock-digest"):
+            with self.subTest(key=key), self.assertRaisesRegex(ClodError, "upstream-lock-digest"):
                 self.check()
             self.add_file(path, original)
             self.assertEqual(digest(original), expected)
@@ -181,10 +181,10 @@ class NativeProvenanceTests(unittest.TestCase):
         upstream = self.gradle()
         artifacts = upstream["delivery"]["artifacts"]
         artifacts[0]["digest"] = "a" * 64
-        with self.assertRaisesRegex(AepmError, "upstream-verification-checksum"):
+        with self.assertRaisesRegex(ClodError, "upstream-verification-checksum"):
             self.check()
         artifacts.pop()
-        with self.assertRaisesRegex(AepmError, "upstream-verification-inventory"):
+        with self.assertRaisesRegex(ClodError, "upstream-verification-inventory"):
             self.check()
 
     def test_gradle_metadata_coordinate_and_xml_entities_reject(self):
@@ -192,10 +192,10 @@ class NativeProvenanceTests(unittest.TestCase):
         verification = upstream["delivery"]["verification"]
         original = (self.source / verification["path"]).read_bytes()
         verification["digest"] = self.add_file(verification["path"], original.replace(b'name="livekit-android"', b'name="different"'))
-        with self.assertRaisesRegex(AepmError, "upstream-verification-coordinate"):
+        with self.assertRaisesRegex(ClodError, "upstream-verification-coordinate"):
             self.check()
         verification["digest"] = self.add_file(verification["path"], b'<!DOCTYPE data [<!ENTITY x "test">]>' + original)
-        with self.assertRaisesRegex(AepmError, "upstream-verification-format"):
+        with self.assertRaisesRegex(ClodError, "upstream-verification-format"):
             self.check()
 
     def test_bundled_wrapper_has_separate_valid_inventory(self):
@@ -208,26 +208,26 @@ class NativeProvenanceTests(unittest.TestCase):
         upstream = self.wrapper()
         wrapper = upstream["delivery"]["gradleWrapper"]
         self.add_file(wrapper["jar"], b"changed")
-        with self.assertRaisesRegex(AepmError, "upstream-file-digest"):
+        with self.assertRaisesRegex(ClodError, "upstream-file-digest"):
             self.check()
         upstream["delivery"]["files"] = [item for item in upstream["delivery"]["files"] if item["path"] != wrapper["properties"]]
-        with self.assertRaisesRegex(AepmError, "upstream-wrapper-inventory"):
+        with self.assertRaisesRegex(ClodError, "upstream-wrapper-inventory"):
             validate_component(self.manifest)
 
     def test_wrapper_distribution_checksum_and_version_bind(self):
         upstream = self.wrapper()
         wrapper = upstream["delivery"]["gradleWrapper"]
         wrapper["distribution"]["digest"] = "a" * 64
-        with self.assertRaisesRegex(AepmError, "upstream-wrapper-distribution"):
+        with self.assertRaisesRegex(ClodError, "upstream-wrapper-distribution"):
             self.check()
         wrapper["distribution"]["url"] = "https://services.gradle.org/distributions/gradle-9.4.1-bin.zip"
-        with self.assertRaisesRegex(AepmError, "upstream-distribution-version"):
+        with self.assertRaisesRegex(ClodError, "upstream-distribution-version"):
             validate_component(self.manifest)
 
     def test_wrapper_without_separate_upstream_record_rejects(self):
         self.wrapper()
         self.manifest["upstream"] = []
-        with self.assertRaisesRegex(AepmError, "upstream-wrapper-unattributed"):
+        with self.assertRaisesRegex(ClodError, "upstream-wrapper-unattributed"):
             validate_component(self.manifest)
 
     def test_native_external_dependency_pins_are_exact_identifiers(self):
@@ -235,20 +235,20 @@ class NativeProvenanceTests(unittest.TestCase):
         validate_component(self.manifest)
         other = deepcopy(self.manifest)
         other["compatibility"]["dependencies"][0]["version"] = "32.0.1-jre"
-        with self.assertRaisesRegex(AepmError, "shared-dependency-conflict"):
+        with self.assertRaisesRegex(ClodError, "shared-dependency-conflict"):
             validate_graph([self.manifest, other])
         for value in ("1.+", "[1,2)", "latest.release", "^1.0.0"):
             self.manifest["compatibility"]["dependencies"][0]["version"] = value
-            with self.subTest(version=value), self.assertRaises(AepmError):
+            with self.subTest(version=value), self.assertRaises(ClodError):
                 validate_component(self.manifest)
 
     def test_missing_or_unsupported_manager_rejects(self):
         upstream = self.swift()
         upstream["delivery"].pop("manager")
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             validate_component(self.manifest)
         upstream["delivery"]["manager"] = "other"
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             validate_component(self.manifest)
 
     def npm_nested(self):
@@ -272,18 +272,18 @@ class NativeProvenanceTests(unittest.TestCase):
         ref = pack(self.source, self.store)
         read_package(ref, self.store)
         upstream["delivery"]["packagePath"] = "node_modules/@scope/example"
-        with self.assertRaisesRegex(AepmError, "upstream-lock-pin"):
+        with self.assertRaisesRegex(ClodError, "upstream-lock-pin"):
             self.check()
 
     def test_npm_lock_key_name_path_and_integrity_bind(self):
         upstream = self.npm_nested()
         for path in ("node_modules/different", "../node_modules/@scope/example", "node_modules/parent/@scope/example"):
             upstream["delivery"]["packagePath"] = path
-            with self.subTest(path=path), self.assertRaises(AepmError):
+            with self.subTest(path=path), self.assertRaises(ClodError):
                 self.check()
         upstream["delivery"]["packagePath"] = "node_modules/parent/node_modules/@scope/example"
         upstream["delivery"]["integrity"] = "sha512-" + base64.b64encode(b"b" * 64).decode()
-        with self.assertRaisesRegex(AepmError, "upstream-lock-pin"):
+        with self.assertRaisesRegex(ClodError, "upstream-lock-pin"):
             self.check()
 
 

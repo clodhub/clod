@@ -9,23 +9,23 @@ import unittest
 from unittest.mock import patch
 from concurrent.futures import ThreadPoolExecutor
 
-from aepm.__main__ import main
-from aepm.authorization import execution_request, authorize_execution
-from aepm.bundle import pack, read_package
-from aepm.environment import clock, claim_key
-from aepm.environment import path_platform
-from aepm.io import load, write
-from aepm.model import AepmError, canonical, digest
-from aepm.test_identities import generate
-from aepm.trust import EXECUTION_AUTHORIZATION, authorization_view, publish_release, review_bindings, sign, validate_report_evidence, verify
-from aepm.verification import review_package
+from clod.__main__ import main
+from clod.authorization import execution_request, authorize_execution
+from clod.bundle import pack, read_package
+from clod.environment import clock, claim_key
+from clod.environment import path_platform
+from clod.io import load, write
+from clod.model import ClodError, canonical, digest
+from clod.test_identities import generate
+from clod.trust import EXECUTION_AUTHORIZATION, authorization_view, publish_release, review_bindings, sign, validate_report_evidence, verify
+from clod.verification import review_package
 from tests.core.test_core import PYTHON, fixture
 
 
 SCRIPT = '''import json, os
 from pathlib import Path
-context=json.loads(Path(os.environ['AEPM_CONTEXT_FILE']).read_text())
-values=json.loads(Path(os.environ['AEPM_SECRETS_FILE']).read_text())['values']
+context=json.loads(Path(os.environ['CLOD_CONTEXT_FILE']).read_text())
+values=json.loads(Path(os.environ['CLOD_SECRETS_FILE']).read_text())['values']
 print(values['livekitKey']['value'])
 assert 'AWS_SECRET_ACCESS_KEY' not in os.environ
 assert set(context['settings']) == {'expectedUpdateVersion'}
@@ -36,7 +36,7 @@ assertions=[{'id':'version-match','passed':matches,'actual':matches}]
 result={'format':1,'runId':context['runId'],'package':context['package'],'id':context['id'],
  'assertions':assertions,'artifacts':[],'resources':[],
  'cleanup':{'required':False,'attempted':False,'completed':True,'reason':''}}
-Path(os.environ['AEPM_RESULT_FILE']).write_text(json.dumps(result,sort_keys=True,separators=(',',':')))
+Path(os.environ['CLOD_RESULT_FILE']).write_text(json.dumps(result,sort_keys=True,separators=(',',':')))
 '''
 
 
@@ -48,7 +48,7 @@ class ExecutionContextTests(unittest.TestCase):
         self.policy = generate(self.root / "keys")
         self.source, self.store = self.root / "source", self.root / "store"
         manifest = fixture(self.source)
-        manifest["format"] = 3
+        manifest["format"] = 4
         manifest["verification"] = manifest["verification"][:1]
         manifest["verification"][0]["execution"] = {"kind": "local", "simulation": False, "operations": [],
                                                        "settings": [], "secrets": [], "resources": [], "assertions": [], "cleanup": None}
@@ -96,7 +96,7 @@ class ExecutionContextTests(unittest.TestCase):
         with patch.dict(os.environ, {"AWS_SECRET_ACCESS_KEY": "DO_NOT_INHERIT"}):
             report = self.run_review()
         self.assertEqual(report["summary"]["required-local"], "passed", report)
-        self.assertEqual(report["format"], 2)
+        self.assertEqual(report["format"], 4)
         validate_report_evidence(report, review_bindings(self.ref, self.store), "review", self.store, self.policy, adoption=True)
         evidence = load(self.store / "execution-evidence" / (report["execution"]["evidenceDigest"] + ".json"))
         observed = next(item for item in evidence["suites"] if item["id"] == "provider-fixture")
@@ -111,7 +111,7 @@ class ExecutionContextTests(unittest.TestCase):
                 raise AssertionError("Replay reached secret loader")
             return load(path)
 
-        with patch("aepm.environment.load", guarded_load), patch("aepm.contextual.prerequisites", side_effect=AssertionError("Replay reached probe")), self.assertRaisesRegex(AepmError, "execution-replayed"):
+        with patch("clod.environment.load", guarded_load), patch("clod.contextual.prerequisites", side_effect=AssertionError("Replay reached probe")), self.assertRaisesRegex(ClodError, "execution-replayed"):
             self.run_review()
 
     def test_missing_context_blocks_without_fake_pass(self):
@@ -124,19 +124,19 @@ class ExecutionContextTests(unittest.TestCase):
         changed = load(self.context)
         changed["settings"]["expectedUpdateVersion"] = "9.9.9"
         write(self.context, changed)
-        with self.assertRaisesRegex(AepmError, "authorization-binding"):
+        with self.assertRaisesRegex(ClodError, "authorization-binding"):
             self.run_review()
         self.assertFalse(list((self.state / "claims").iterdir()))
         request = load(self.request)
         request["suiteSetDigest"] = "f" * 64
         write(self.request, request)
-        with self.assertRaisesRegex(AepmError, "request-binding"):
+        with self.assertRaisesRegex(ClodError, "request-binding"):
             authorize_execution(self.request, self.root / "keys/owner.pem", self.policy, self.root / "other")
 
     def test_expired_and_missing_secret_fail(self):
         self.authorize()
         statement = self.granted()
-        with patch("aepm.environment.clock", return_value=statement["expiresAt"]), self.assertRaises(AepmError):
+        with patch("clod.environment.clock", return_value=statement["expiresAt"]), self.assertRaises(ClodError):
             self.run_review()
         write(self.secret_file, {"format": 1, "values": {}})
         report = self.run_review()
@@ -144,8 +144,8 @@ class ExecutionContextTests(unittest.TestCase):
 
     def test_deployed_simulation_never_reports_live_pass(self):
         self.authorize()
-        from aepm.contextual import execute
-        from aepm.environment import Execution
+        from clod.contextual import execute
+        from clod.environment import Execution
         binding = review_bindings(self.ref, self.store)
         execution = Execution({**binding, "context": "review"}, self.policy, self.store,
                               execution_context=self.context, authorization=self.authorization, execution_state=self.state, secrets=self.secret_file)
@@ -168,7 +168,7 @@ class ExecutionContextTests(unittest.TestCase):
         command(["authorize-execution", self.request, "--key", self.root / "keys/owner.pem", "--policy", self.policy, "--out", self.authorization])
         result = command(["review", self.ref["digest"], "--store", self.store, "--policy", self.policy, "--trusted",
                           "--context", self.context, "--authorization", self.authorization, "--execution-state", self.state, "--secrets", self.secret_file])
-        self.assertEqual(result["result"]["format"], 2)
+        self.assertEqual(result["result"]["format"], 4)
 
     def test_failed_real_assertion_and_profile_cleanup_failure(self):
         context = load(self.context)
@@ -189,7 +189,7 @@ class ExecutionContextTests(unittest.TestCase):
             return original(path, *args, **kwargs)
 
         self.authorize()
-        with patch("aepm.contextual.shutil.rmtree", refuse_profile):
+        with patch("clod.contextual.shutil.rmtree", refuse_profile):
             report = self.run_review()
         contextual = [item for item in report["suites"] if "classEvidence" not in item]
         self.assertTrue(all(item["status"] == "failed" and item["reason"] == "cleanup-failed" for item in contextual))
@@ -208,7 +208,7 @@ class ExecutionContextTests(unittest.TestCase):
         def attempt():
             try:
                 return self.run_review()["summary"]["required-local"]
-            except AepmError as error:
+            except ClodError as error:
                 return error.code
 
         with ThreadPoolExecutor(max_workers=2) as pool:
@@ -220,12 +220,12 @@ class ExecutionContextTests(unittest.TestCase):
         statement, _ = verify(self.authorization.read_bytes(), "owner", self.policy, EXECUTION_AUTHORIZATION)
         statement["predicate"]["suites"][0]["operations"] = ["update-get"]
         write(self.authorization, sign(statement, "owner", self.root / "keys/owner.pem"))
-        with self.assertRaisesRegex(AepmError, "authorization-denied"):
+        with self.assertRaisesRegex(ClodError, "authorization-denied"):
             self.run_review()
         self.assertFalse(list((self.state / "claims").iterdir()))
 
     def test_expiry_after_real_execution_prevents_completion(self):
-        from aepm import contextual
+        from clod import contextual
         self.authorize()
         statement = self.granted()
         actual_run, state = contextual.run, {"now": clock()}
@@ -236,7 +236,7 @@ class ExecutionContextTests(unittest.TestCase):
                 state["now"] = statement["expiresAt"]
             return result
 
-        with patch("aepm.environment.clock", side_effect=lambda: state["now"]), patch("aepm.contextual.run", expire), self.assertRaisesRegex(AepmError, "authorization-expired"):
+        with patch("clod.environment.clock", side_effect=lambda: state["now"]), patch("clod.contextual.run", expire), self.assertRaisesRegex(ClodError, "authorization-expired"):
             self.run_review()
         self.assertEqual(len(list((self.state / "claims").iterdir())), 1)
         self.assertFalse(list((self.state / "completions").iterdir()))
@@ -250,5 +250,5 @@ class ExecutionContextTests(unittest.TestCase):
         value = load(path)
         value["reportDigest"] = "f" * 64
         write(path, value)
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             validate_report_evidence(report, review_bindings(self.ref, self.store), "review", self.store, self.policy, adoption=True)

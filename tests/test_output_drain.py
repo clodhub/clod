@@ -9,7 +9,7 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 
-from aepm import process
+from clod import process
 
 if os.name == "nt":
     raise unittest.SkipTest("POSIX private-process output draining")
@@ -44,8 +44,8 @@ class OutputDrainTests(unittest.TestCase):
         instance.observe_exit.side_effect = lambda: 0 if exits else None
         instance.terminate_tree.return_value = True
         instance.reap.return_value = 0
-        with patch("aepm.posix_process.ContainedProcess", return_value=instance), \
-                patch("aepm.process.time", clock):
+        with patch("clod.posix_process.ContainedProcess", return_value=instance), \
+                patch("clod.process.time", clock):
             result = process.run(["fixture"], ".", {}, timeout, limit, stdout_only=stdout_only)
         return result, instance.sample_private.call_count
 

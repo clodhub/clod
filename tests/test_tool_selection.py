@@ -14,9 +14,9 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from aepm import contextual, verification
-from aepm.model import AepmError
-from aepm.tool_selection import ToolSelection, load_tool_selection, require_selection
+from clod import contextual, verification
+from clod.model import ClodError
+from clod.tool_selection import ToolSelection, load_tool_selection, require_selection
 
 if os.name == "nt":
     raise unittest.SkipTest("POSIX tool-selection aliases; Windows refuses tool selection")
@@ -91,21 +91,21 @@ class ValidatorTests(Guarded):
         for index, change in enumerate(changes):
             document = deepcopy(self.document)
             change(document)
-            with self.subTest(index=index), self.assertRaises(AepmError) as caught:
+            with self.subTest(index=index), self.assertRaises(ClodError) as caught:
                 self.selection(document)
             self.assertEqual(caught.exception.code, "tool-selection-invalid")
 
     def test_required_names_must_match_exactly(self):
         for required in (self.required - {"node"}, self.required | {"git"}):
-            with self.subTest(required=sorted(required)), self.assertRaises(AepmError) as caught:
+            with self.subTest(required=sorted(required)), self.assertRaises(ClodError) as caught:
                 self.selection(required=required)
             self.assertEqual(caught.exception.code, "tool-selection-invalid")
 
     def test_non_posix_and_wrong_type_rejected(self):
-        with patch.object(os, "name", "nt"), self.assertRaises(AepmError):
+        with patch.object(os, "name", "nt"), self.assertRaises(ClodError):
             self.selection()
         for value in ({"path": "x"}, "selection", 1):
-            with self.subTest(value=value), self.assertRaises(AepmError) as caught:
+            with self.subTest(value=value), self.assertRaises(ClodError) as caught:
                 require_selection(value)
             self.assertEqual(caught.exception.code, "tool-selection-invalid")
         self.assertIsNone(require_selection(None))
@@ -115,7 +115,7 @@ class ValidatorTests(Guarded):
         document = deepcopy(self.document)
         document["searchPath"] = ["/usr/bin", "/bin", str(self.bin)]
         document["tools"]["true"] = binding(self.bin / "true")
-        with self.assertRaises(AepmError) as caught:
+        with self.assertRaises(ClodError) as caught:
             self.selection(document, self.required | {"true"})
         self.assertEqual((caught.exception.code, caught.exception.path), ("resource-changed", "tool"))
 
@@ -131,7 +131,7 @@ class ValidatorTests(Guarded):
                 elif fault == "link":
                     (self.bin / "python3").unlink()
                     (self.bin / "python3").symlink_to("node")
-                with self.assertRaises(AepmError) as caught:
+                with self.assertRaises(ClodError) as caught:
                     if fault == "canonical-mismatch":
                         selection.check("python3", str(self.shadow / "python3"), selection.path)
                     elif fault == "path-mismatch":
@@ -146,10 +146,10 @@ class ValidatorTests(Guarded):
 
     def test_unavailable_and_unknown_names(self):
         selection = self.selection()
-        with self.assertRaises(AepmError) as caught:
+        with self.assertRaises(ClodError) as caught:
             selection.resolve("xcrun")
         self.assertEqual((caught.exception.code, caught.exception.path), ("tool-unavailable", "xcrun"))
-        with self.assertRaises(AepmError) as caught:
+        with self.assertRaises(ClodError) as caught:
             selection.resolve("git")
         self.assertEqual((caught.exception.code, caught.exception.path), ("tool-unavailable", "tools"))
 
@@ -188,7 +188,7 @@ class ContextualTests(Guarded):
                                               tool_selection=selection)
             self.assertEqual(argv, [str(self.python), *tail])
         shadowed = {**environment, "PATH": os.pathsep.join([str(self.shadow), environment["PATH"]])}
-        with self.assertRaises(AepmError) as caught:
+        with self.assertRaises(ClodError) as caught:
             contextual.resolve_command(["python3", "--version"], self.root, {"python3": "3.12"}, shadowed,
                                        tool_selection=selection)
         self.assertEqual(caught.exception.code, "resource-changed")
@@ -238,7 +238,7 @@ class ContextualTests(Guarded):
         tools = {"xcodebuild": "27.2", "xcrun": "72"}
         aliases = self.root / "private/tools"
         for fault in ("preexisting", "retargeted", "shadowed"):
-            with self.subTest(fault=fault), self.assertRaises(AepmError) as caught:
+            with self.subTest(fault=fault), self.assertRaises(ClodError) as caught:
                 if fault == "preexisting":
                     home = self.root / "private/home"
                     shutil.rmtree(home.parent, ignore_errors=True)
@@ -277,7 +277,7 @@ class ContextualTests(Guarded):
 
     def test_selection_on_windows_fails_explicitly(self):
         selection = self.selection()
-        with patch.object(contextual.os, "name", "nt"), self.assertRaises(AepmError) as caught:
+        with patch.object(contextual.os, "name", "nt"), self.assertRaises(ClodError) as caught:
             contextual.tool_environment(self.root / "private/home", {"python3": "3.12"}, [], tool_selection=selection)
         self.assertEqual((caught.exception.code, caught.exception.path), ("tool-selection-invalid", "toolSelection"))
         self.assertFalse((self.root / "private").exists())
@@ -388,7 +388,7 @@ class ContextualTests(Guarded):
 
     def test_unavailable_tool_blocks_contextual_suite(self):
         selection = self.selection()
-        with self.assertRaises(AepmError) as caught:
+        with self.assertRaises(ClodError) as caught:
             self.environment({"xcrun": "72"}, selection=selection)
         self.assertEqual((caught.exception.code, caught.exception.path), ("tool-unavailable", "xcrun"))
         workspace = Mock(preserve=False)
@@ -424,7 +424,7 @@ class ContextualTests(Guarded):
             contextual.probe_json(["xcrun", "simctl", "list", "-j"], self.root, environment, tool_selection=selection)
             self.assertEqual(launched[-1][0], str(self.bin / "xcrun"))
             shadowed = {"PATH": os.pathsep.join([str(self.shadow), selection.path])}
-            with self.assertRaises(AepmError) as caught:
+            with self.assertRaises(ClodError) as caught:
                 contextual.probe_json(["xcrun", "simctl", "list", "-j"], self.root, shadowed, tool_selection=selection)
             self.assertEqual(caught.exception.code, "resource-changed")
             self.assertEqual(len(launched), 1)
@@ -432,7 +432,7 @@ class ContextualTests(Guarded):
             contextual.probe_json(["xcodebuild", "-list"], self.root, resource, tool_selection=selection,
                                   resource_names=frozenset({"xcodebuild"}))
             self.assertEqual(launched[-1][0], str(self.shadow / "xcodebuild"))
-        with self.assertRaises(AepmError) as caught:
+        with self.assertRaises(ClodError) as caught:
             contextual._selected_which("xcodebuild", shadowed, selection, frozenset())
         self.assertEqual(caught.exception.code, "tool-unavailable")
 
@@ -498,21 +498,21 @@ class OrdinarySuiteTests(Guarded):
             link.symlink_to(self.shadow / "python3")
             return 0, 0, "", b"Python 3.12.8\n"
 
-        with self.assertRaises(AepmError) as caught:
+        with self.assertRaises(ClodError) as caught:
             self.execute(selection, {"python3": "3.12"}, run)
         self.assertEqual(caught.exception.code, "resource-changed")
 
 
 class EntryTests(Guarded):
     def test_entry_points_reject_non_selection(self):
-        from aepm import update
+        from clod import update
         calls = [lambda: verification.verify_application(self.root, self.root / "p", True, tool_selection="x"),
                  lambda: verification.review_package({}, self.root, self.root / "p", True, tool_selection="x"),
                  lambda: update.propose(self.root, {}, self.root, self.root / "p", True, tool_selection="x"),
                  lambda: verification.make_report({}, "", {}, {}, None, self.root / "p", True, False, "review",
                                                   self.root / "logs", tool_selection="x")]
         for index, call in enumerate(calls):
-            with self.subTest(index=index), self.assertRaises(AepmError) as caught:
+            with self.subTest(index=index), self.assertRaises(ClodError) as caught:
                 call()
             self.assertEqual(caught.exception.code, "tool-selection-invalid")
 
@@ -520,10 +520,10 @@ class EntryTests(Guarded):
         selection = self.selection()
         suites = [{"package": "a" * 64, "id": "ordinary", "root": "package", "scope": "platform", "requirements": []}]
         seen = []
-        with patch("aepm.trust.load_policy", return_value={"trustedExecution": ["a" * 64]}), \
+        with patch("clod.trust.load_policy", return_value={"trustedExecution": ["a" * 64]}), \
                 patch.object(verification, "declarations", return_value=suites), \
-                patch("aepm.authorization.bindings", return_value={}), \
-                patch("aepm.environment.Execution", side_effect=AssertionError("no contextual execution")), \
+                patch("clod.authorization.bindings", return_value={}), \
+                patch("clod.environment.Execution", side_effect=AssertionError("no contextual execution")), \
                 patch.object(verification, "execute_suite",
                              side_effect=lambda *a, tool_selection=None: seen.append(tool_selection) or
                              {"package": "a" * 64, "id": "ordinary", "scope": "platform", "status": "blocked",

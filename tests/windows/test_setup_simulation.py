@@ -7,8 +7,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from aepm import windows
-from aepm.model import AepmError
+from clod import windows
+from clod.model import ClodError
 
 
 class KernelFixture:
@@ -80,7 +80,7 @@ class SimulatedWindowsSetupTests(unittest.TestCase):
         for failure in ("inheritance", "inheritance-second", "stdin"):
             with self.subTest(failure=failure):
                 kernel = KernelFixture(failure)
-                with patch.object(windows, "api", return_value=kernel), patch.dict(sys.modules, {"msvcrt": SimpleNamespace()}), self.assertRaisesRegex(AepmError, "windows-containment-unavailable"):
+                with patch.object(windows, "api", return_value=kernel), patch.dict(sys.modules, {"msvcrt": SimpleNamespace()}), self.assertRaisesRegex(ClodError, "windows-containment-unavailable"):
                     windows.ContainedProcess(["fixture.exe"], ".", {})
                 self.assertFalse(kernel.created)
                 self.assertEqual(Counter(kernel.closed), Counter(kernel.allocated))
@@ -112,7 +112,7 @@ class SimulatedWindowsSetupTests(unittest.TestCase):
                             raise OSError("simulated stream failure")
                         return SimpleNamespace(close=lambda: None)
 
-                    with patch.object(windows, "api", return_value=kernel), patch.dict(sys.modules, {"msvcrt": SimpleNamespace(open_osfhandle=open_descriptor)}), patch.object(windows.os, "fdopen", open_stream), patch.object(windows.os, "close", close_descriptor), self.assertRaises(AepmError):
+                    with patch.object(windows, "api", return_value=kernel), patch.dict(sys.modules, {"msvcrt": SimpleNamespace(open_osfhandle=open_descriptor)}), patch.object(windows.os, "fdopen", open_stream), patch.object(windows.os, "close", close_descriptor), self.assertRaises(ClodError):
                         windows.ContainedProcess(["fixture.exe"], ".", {})
                     self.assertTrue(kernel.created)
                     self.assertFalse(kernel.resumed)

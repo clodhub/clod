@@ -13,15 +13,15 @@ import time
 import unittest
 from unittest.mock import patch
 
-from aepm.application import assemble
-from aepm.contextual import tool_environment
-from aepm.io import load, private_directory
-from aepm.model import canonical, digest
-from aepm.process import run
-from aepm.supervision import supervision_step_index, validate_log_index
-from aepm.trust import review_bindings, validate_report_evidence, verify_package
-from aepm.verification import review_package, verify_application, retained_manifests, transaction_path
-from aepm.authorization import bindings
+from clod.application import assemble
+from clod.contextual import tool_environment
+from clod.io import load, private_directory
+from clod.model import canonical, digest
+from clod.process import run
+from clod.supervision import supervision_step_index, validate_log_index
+from clod.trust import review_bindings, validate_report_evidence, verify_package
+from clod.verification import review_package, verify_application, retained_manifests, transaction_path
+from clod.authorization import bindings
 
 
 @unittest.skipUnless(os.name == "nt", "Actual Windows host unavailable; no native success claimed")
@@ -75,9 +75,9 @@ class NativeWindowsTests(unittest.TestCase):
             self.assertLessEqual(len(result[3]), 1024)
 
     def public_fixture(self, destination):
-        configured = os.environ.get("AEPM_WINDOWS_FIXTURE")
+        configured = os.environ.get("CLOD_WINDOWS_FIXTURE")
         if not configured:
-            self.skipTest("Set AEPM_WINDOWS_FIXTURE to a public fixture prepared on a supported packing host")
+            self.skipTest("Set CLOD_WINDOWS_FIXTURE to a public fixture prepared on a supported packing host")
         source = Path(configured).resolve()
         self.assertEqual(load(source / "fixture.json")["preparedOn"], "posix")
         shutil.copytree(source, destination)
@@ -119,7 +119,7 @@ class NativeWindowsTests(unittest.TestCase):
             root = private_directory(Path(directory))
             fixture, store, policy = self.public_fixture(root / "public")
             verify_package(fixture["ref"], store, policy)
-            with patch.dict(os.environ, {"AEPM_WINDOWS_TEST_SECRET": "SYNTHETIC_ONLY"}):
+            with patch.dict(os.environ, {"CLOD_WINDOWS_TEST_SECRET": "SYNTHETIC_ONLY"}):
                 report = review_package(fixture["ref"], store, policy, True)
             self.assertEqual(report["summary"]["required-local"], "passed")
             validate_report_evidence(report, review_bindings(fixture["ref"], store), "review", store, policy)

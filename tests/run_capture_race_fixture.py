@@ -130,13 +130,13 @@ def main(inventory_digest):
     before = inventory_check(inventory_digest)
     ordinary(OUT)
     require(not OUT.exists() and OUT.parent.is_dir(), "occupied output")
-    import aepm
-    require(Path(aepm.__file__).resolve().is_relative_to(COPY), "frozen copy import required")
-    from aepm.contextual import tool_environment
-    from aepm.posix_process import ContainedProcess
-    from aepm.private_process import DarwinBackend, enroll_root
-    from aepm.process import run
-    from aepm.supervision import Recorder
+    import clod
+    require(Path(clod.__file__).resolve().is_relative_to(COPY), "frozen copy import required")
+    from clod.contextual import tool_environment
+    from clod.posix_process import ContainedProcess
+    from clod.private_process import DarwinBackend, enroll_root
+    from clod.process import run
+    from clod.supervision import Recorder
     from tests.discovery_observer import DiscoveryObserver
 
     OUT.mkdir(mode=0o700)
@@ -179,7 +179,7 @@ def main(inventory_digest):
     churn = sentinel = None
     environment = {"PATH": "/usr/bin:/bin", "HOME": str(unrelated), "TMPDIR": str(unrelated)}
     patches = [patch.object(DarwinBackend, "__init__", attach), patch.object(DarwinBackend, "terminate", terminate),
-               patch("aepm.posix_process.os.killpg", killpg), patch.object(ContainedProcess, "__init__", contained)]
+               patch("clod.posix_process.os.killpg", killpg), patch.object(ContainedProcess, "__init__", contained)]
     for item in patches:
         item.start()
     worker = None

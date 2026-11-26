@@ -1,0 +1,480 @@
+"""Explicitly trusted execution with rooted copies and complete evidence."""
+
+import os
+from pathlib import Path
+import re
+import shutil
+import tempfile
+
+from .application import read_assembly, validate_retained_assembly
+from .io import VerificationDirectory, fail, immutable_blob, linked, load, rooted, snapshot, write
+from .model import REPORT_FORMAT, Report, canonical, digest, guarded, validate_component
+from .tool_selection import require_selection
+
+
+SCOPES = ("required-local", "platform", "deployed")
+TRUSTED = "--trusted is required: it permits running the packages' declared verification checks on this host"
+OUTPUT_LIMIT = 8 * 1024 * 1024
+
+
+def declarations(packages, manifests, context):
+    result = []
+    seen = set()
+    for ref in packages:
+        from .foundations import class_suites
+        manifest = manifests[ref["digest"]]
+        for suite in [*manifest["verification"], *class_suites(manifest)]:
+            if context == "review" and suite["root"] != "package":
+                continue
+            key = (ref["digest"], suite["id"])
+            if key in seen:
+                fail("duplicate-suite", "verification")
+            seen.add(key)
+            result.append({**suite, "package": ref["digest"]})
+    return sorted(result, key=lambda item: (item["package"], item["id"]))
+
+
+def package_records(lock):
+    return [{**{key: ref[key] for key in ("name", "version", "digest")},
+             "dependencies": sorted(item["digest"] for item in ref["dependencies"])} for ref in lock["packages"]]
+
+
+def summary(suites):
+    result = {}
+    for scope in SCOPES:
+        statuses = [suite["status"] for suite in suites if suite["scope"] == scope]
+        result[scope] = ("not-applicable" if not statuses else "failed" if "failed" in statuses else
+                         "blocked" if "blocked" in statuses else "passed")
+    return result
+
+
+def check_report(report, lock, assembly_digest, manifests, context="application", *, evidence_root=None, policy=None, adoption=False):
+    from .authorization import bindings
+    from .trust import validate_report_evidence
+    return validate_report_evidence(report, bindings(lock, assembly_digest, manifests, context), context,
+                                    evidence_root, policy, adoption=adoption)
+
+
+def retained_manifests(root, policy):
+    from .bundle import source_tree_digest, validate_extracted_mode
+    from .trust import RELEASE, archive_name, purl, verify
+
+    root = Path(root)
+    assembly = read_assembly(root)
+    manifests = {}
+    for ref in assembly["lock"]["packages"]:
+        package_root = rooted(root, ".clod/packages/" + ref["digest"])
+        manifest = validate_component(load(package_root / "component.json"))
+        files = {item["path"] for item in snapshot(package_root) if item["kind"] == "file"}
+        if files != {item["path"] for item in manifest["files"]} | {"component.json"}:
+            fail("retained-membership", "packages")
+        payloads = {item["path"]: rooted(package_root, item["path"]).read_bytes() for item in manifest["files"]}
+        receipts = root / ".clod/receipts" / ref["digest"]
+        release, _ = verify((receipts / "release.dsse.json").read_bytes(), "release", Path(policy), RELEASE)
+        identity = manifest["identity"]
+        released = release["subject"][0]
+        if (released["digest"]["sha256"] != ref["digest"] or released["name"] != archive_name(ref["name"], ref["version"])
+                or release["predicate"]["releaseId"] != ref["name"]
+                or release["predicate"]["purl"] != purl(ref["name"], ref["version"])
+                or any(identity[key] != ref[key] for key in ("name", "version"))):
+            fail("retained-identity", "packages")
+        source = released["annotations"]["sourceTreeDigest"]
+        if source_tree_digest(manifest, payloads) != source or identity["sourceTreeDigest"] != source:
+            fail("retained-source", "packages")
+        from .foundations import validate_package_foundations
+        validate_package_foundations(manifest, payloads)
+        for item in manifest["files"]:
+            validate_extracted_mode(rooted(package_root, item["path"]), item["executable"])
+        manifests[ref["digest"]] = manifest
+    by_name = {item["name"]: item for item in assembly["lock"]["packages"]}
+    for ref in assembly["lock"]["packages"]:
+        dependencies = []
+        for requirement in manifests[ref["digest"]]["dependencies"]:
+            dependency = by_name.get(requirement["name"])
+            if dependency is None or dependency["version"] != requirement["version"]:
+                fail("retained-dependencies", "lock")
+            dependencies.append({"name": dependency["name"], "digest": dependency["digest"]})
+        if ref["dependencies"] != sorted(dependencies, key=lambda item: item["name"]):
+            fail("retained-dependencies", "lock")
+    validate_retained_assembly(root, assembly, manifests)
+    return assembly, manifests
+
+
+def run(argv, cwd, environment, timeout, output_limit=OUTPUT_LIMIT, **options):
+    from .process import run as contained_run
+    return contained_run(argv, cwd, environment, timeout, output_limit, **options)
+
+
+def execution_environment(home, tools, *, tool_selection=None):
+    tool_selection = require_selection(tool_selection)
+    if os.name == "nt":
+        from .contextual import tool_environment
+        from .model import ClodError
+        try:
+            return tool_environment(home, tools, [])
+        except ClodError:
+            return None
+    home.mkdir()
+    bin_path = home / "bin"
+    bin_path.mkdir()
+    for name in tools:
+        if "/" in name or "\\" in name:
+            fail("tool-name", "tools")
+        if tool_selection is not None:
+            from .model import ClodError
+            try:
+                executable = tool_selection.canonical(name)
+            except ClodError as error:
+                if error.code == "tool-unavailable":
+                    return None
+                raise
+        else:
+            from .host_tools import host_tool
+            executable = host_tool(name)
+            if executable is None:
+                return None
+        (bin_path / name).symlink_to(Path(executable).resolve())
+    tail = tool_selection.path if tool_selection is not None else os.defpath
+    environment = {"PATH": str(bin_path) + os.pathsep + tail, "HOME": str(home), "CLOD_PRIVATE_ROOT": str(home.parent),
+            "TMPDIR": str(home), "XDG_CACHE_HOME": str(home / "cache"), "XDG_CONFIG_HOME": str(home / "config"),
+            "npm_config_cache": str(home / "npm"), "npm_config_userconfig": str(home / "npmrc"),
+            "GRADLE_USER_HOME": str(home / "gradle"), "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8",
+            "CI": "true", "PYTHONDONTWRITEBYTECODE": "1", **apple_home(home)}
+    if tool_selection is not None:
+        check_links(home, tools, tool_selection)
+    return environment
+
+
+def apple_home(home):
+    """On macOS, Xcode, SwiftPM and other Foundation tools find their home through CFFIXED_USER_HOME, not HOME; without
+    it DerivedData and package caches land in the user's real Library."""
+    import sys
+    return {"CFFIXED_USER_HOME": str(home)} if sys.platform == "darwin" else {}
+
+
+def check_links(home, tools, tool_selection):
+    for name in tools:
+        tool_selection.check(name, os.readlink(home / "bin" / name), tool_selection.path)
+
+
+def host_command(argv, cwd, tools, environment):
+    """POSIX launches search PATH; Windows process creation needs the resolved executable."""
+    if os.name != "nt":
+        return argv
+    from .contextual import resolve_command
+    from .model import ClodError
+    try:
+        return resolve_command(argv, cwd, tools, environment)
+    except ClodError:
+        return None
+
+
+def check_bytes(suite, source, resources=()) -> int:
+    """Bytes a check may write: its measured copied inputs plus fallbacks only where no inventory gives a size."""
+    from .locks import kinds_for
+    from .space import ANDROID_MEDIA_CHECK, APPLE_DESIGN_BUILD, NPM_INSTALL, tree_bytes
+    needed = tree_bytes(source) if source is not None else 0
+    needed += sum(resource_bytes(item) for item in resources)
+    steps = [*suite.get("prepare", []), {"argv": suite["argv"]}]
+    needed += NPM_INSTALL * sum(1 for step in steps if step["argv"][:1] == ["npm"] and step["argv"][1:2] in (["ci"], ["install"]))
+    kinds = kinds_for(suite)
+    if "gradle" in kinds:
+        needed += ANDROID_MEDIA_CHECK
+    if "xcode" in kinds and suite.get("root") == "application":
+        needed += APPLE_DESIGN_BUILD
+    return needed
+
+
+def resource_bytes(resource) -> int:
+    """The recorded size of a copied resource; an uncopied (read-only) resource adds nothing."""
+    from .space import tree_bytes
+    return tree_bytes(resource["path"])
+
+
+def low_space(path) -> bool:
+    from .space import free_bytes, margin
+    try:
+        return free_bytes(path) < margin()
+    except OSError:
+        return False
+
+
+def stopped_result(suite, space, logs):
+    evidence = canonical([{"step": "validation-inputs", "preparation": True, "seconds": 0, "exitCode": None,
+                           "reason": "insufficient-space", "suppressed": True}])
+    logs.mkdir(parents=True, exist_ok=True)
+    immutable_blob(logs / (digest(evidence) + ".json"), evidence)
+    return {"package": suite["package"], "id": suite["id"], "scope": suite["scope"], "status": "blocked", "exitCode": None,
+            "seconds": 0, "reason": "insufficient-space", "logDigest": digest(evidence),
+            "storage": {"writtenBytes": 0, "keptBytes": 0}, "locks": [], "space": dict(space)}
+
+
+def execute_suite(suite, source, allow_network, logs, *, tool_selection=None, adoption_root=None):
+    from contextlib import ExitStack
+    from .copying import copy_tree
+    from .locks import heavy, kinds_for
+    from .model import ClodError
+    from .space import from_os_error, out_of_space, reserve
+    tool_selection = require_selection(tool_selection)
+    adoption = {} if adoption_root is None else {"adoption_root": adoption_root}
+    status, code, reason, seconds = "blocked", None, "", 0
+    events, locks, storage, space = [], [], {"writtenBytes": 0, "keptBytes": 0}, None
+    output_remaining = OUTPUT_LIMIT
+    if suite["requirements"]:
+        reason = "external-prerequisites-unavailable:" + ",".join(sorted(suite["requirements"]))
+    elif suite["scope"] == "deployed":
+        reason = "deployed-environment-not-authorized"
+    elif suite["network"] and not allow_network:
+        reason = "network-not-authorized"
+    if not reason:
+        temporary = tempfile.gettempdir()
+        admitted = ExitStack()
+        try:
+            admitted.enter_context(reserve(temporary, check_bytes(suite, source), purpose="check " + suite["id"]))
+        except ClodError as error:
+            if error.code != "insufficient-space":
+                raise
+            status, reason, space = "blocked", "insufficient-space", error.detail
+    if not reason:
+        with admitted:
+            workspace = VerificationDirectory(prefix="clod-verification-", purpose="check " + suite["id"])
+            with workspace as directory:
+                private = Path(directory).resolve()
+                try:
+                    snapshot(source)
+                    copy_tree(source, private / "root")
+                    root = private / "root"
+                    environment = execution_environment(private / "home", suite["tools"], tool_selection=tool_selection)
+                    if environment is None:
+                        reason = "tool-unavailable"
+                    if environment is not None:
+                        if "class" in suite:
+                            from .foundations import module_sources
+                            manifest = load(root / "component.json")
+                            environment.update(CLOD_CANDIDATE_ROOT=str(root), CLOD_CANDIDATE_MANIFEST=str(root / "component.json"),
+                                               CLOD_CANDIDATE_DIGEST=suite["package"], CLOD_CLASS_DIGEST=suite["class"]["digest"],
+                                               CLOD_MODULE_MAP=canonical(module_sources(manifest, root)).decode())
+                        from .seeds import seed_check
+                        seed_check(root, environment)
+                        for name, expected_version in suite["tools"].items():
+                            version_flag = "-version" if name in ("java", "javac", "swift", "xcodebuild", "kotlinc") else "--version"
+                            if tool_selection is not None:
+                                check_links(private / "home", suite["tools"], tool_selection)
+                            probe = host_command([name, version_flag], root, suite["tools"], environment)
+                            if probe is None:
+                                reason = "tool-unavailable"
+                                break
+                            tool_code, _, tool_reason, version_output = run(probe, root, environment, 10, 65536)
+                            if tool_reason == "cleanup-failed":
+                                workspace.preserve = True
+                                status, reason = "failed", "cleanup-failed"
+                                break
+                            if tool_code != 0 or tool_reason:
+                                reason = "tool-version-unavailable"
+                                break
+                            from .host_tools import version_matches
+                            if version_matches(version_output.decode("utf-8", errors="replace"), expected_version) is None:
+                                reason = "tool-version-mismatch"
+                                break
+                    for name in [*suite["fixtures"], *suite["locks"]]:
+                        if not rooted(root, name).exists():
+                            fail("verification-input", name)
+                    steps = [*suite["prepare"], {"argv": suite["argv"], "cwd": suite["cwd"], "network": suite["network"]}]
+                    held = ExitStack()
+                    with held:
+                        if not reason:
+                            for kind in kinds_for(suite):
+                                waited = held.enter_context(heavy(kind, purpose="check " + suite["id"]))
+                                locks.append({"kind": kind, "waitedMilliseconds": round(waited * 1000)})
+                                if kind == "android-emulator":
+                                    from .locks import free_port
+                                    environment["CLOD_EMULATOR_PORT"] = str(free_port())
+                        for index, step in enumerate(steps):
+                            if reason:
+                                break
+                            if step["network"] and not allow_network:
+                                reason = "preparation-network-not-authorized"
+                                break
+                            cwd = rooted(root, step["cwd"], dot=True)
+                            if not cwd.is_dir():
+                                fail("verification-cwd", "verification")
+                            argv = list(step["argv"])
+                            if "/" in argv[0]:
+                                executable = rooted(cwd, argv[0][2:] if argv[0].startswith("./") else argv[0])
+                                if not executable.is_file():
+                                    reason = "tool-unavailable"
+                                    break
+                                argv[0] = str(executable)
+                            elif argv[0] not in suite["tools"]:
+                                reason = "undeclared-tool"
+                                break
+                            else:
+                                argv = host_command(argv, cwd, suite["tools"], environment)
+                                if argv is None:
+                                    reason = "tool-unavailable"
+                                    break
+                            if tool_selection is not None:
+                                check_links(private / "home", suite["tools"], tool_selection)
+                            code, duration, failure, output = run(argv, cwd, environment, suite["timeoutSeconds"], output_remaining, **adoption)
+                            if failure == "cleanup-failed":
+                                workspace.preserve = True
+                            output_remaining -= len(output)
+                            seconds += duration
+                            # Only scrubbed-environment output is retained; no real credentials are supplied.
+                            log_digest = digest(output)
+                            logs.mkdir(parents=True, exist_ok=True)
+                            immutable_blob(logs / (log_digest + ".log"), output)
+                            events.append({"step": index, "preparation": index < len(steps) - 1,
+                                           "seconds": duration, "exitCode": code, "reason": failure, "logDigest": log_digest})
+                            if failure or code != 0:
+                                if not failure and low_space(private):
+                                    from .space import insufficient, free_bytes
+                                    space = insufficient(private, "check " + suite["id"], None, free_bytes(private)).detail
+                                    reason, status = "insufficient-space", "failed"
+                                    break
+                                reason = failure or ("preparation-failed" if index < len(steps) - 1 else "nonzero-exit")
+                                status = "failed" if index == len(steps) - 1 or failure == "cleanup-failed" else "blocked"
+                                break
+                        else:
+                            status = "passed"
+                    if not workspace.preserve and status == "passed":
+                        from .seeds import harvest_check
+                        harvest_check(root, environment)
+                except (OSError, ClodError) as error:
+                    if isinstance(error, OSError) and not out_of_space(error):
+                        raise
+                    if isinstance(error, ClodError) and error.code != "insufficient-space":
+                        raise
+                    detail = (from_os_error(error, "check " + suite["id"]) if isinstance(error, OSError) else error).detail
+                    # A failed cleanup keeps the root and names the result; the full volume is recorded beside it.
+                    status, reason, space = "failed", "cleanup-failed" if workspace.preserve else "insufficient-space", detail
+                if workspace.preserve:
+                    workspace.retained = "cleanup-failed"
+                    events.append({"step": "retained-private-root", "preparation": False, "seconds": 0,
+                                   "exitCode": None, "reason": "cleanup-failed", "path": str(private)})
+            storage = {"writtenBytes": workspace.written, "keptBytes": workspace.kept}
+    evidence = canonical(events)
+    log_digest = digest(evidence)
+    logs.mkdir(parents=True, exist_ok=True)
+    immutable_blob(logs / (log_digest + ".json"), evidence)
+    result = {"package": suite["package"], "id": suite["id"], "scope": suite["scope"], "status": status,
+              "exitCode": code, "seconds": seconds, "reason": reason, "logDigest": log_digest, "storage": storage, "locks": locks}
+    if space is not None:
+        result["space"] = space
+    return result
+
+
+def make_report(lock, assembly_digest, manifests, roots, application_root, policy, trusted, allow_network, context, logs, *,
+                tool_selection=None, adoption_root=None, **execution_options):
+    from .private_process import adoption_root as validate_adoption_root
+    tool_selection = require_selection(tool_selection)
+    adoption_root = validate_adoption_root(adoption_root)
+    adoption = {} if adoption_root is None else {"adoption_root": adoption_root}
+    from .authorization import bindings
+    from .contextual import execute, evidence_record
+    from .environment import Execution, clock
+    from .trust import load_policy
+    if trusted is not True:
+        fail("trusted-execution-required", TRUSTED)
+    policy_data = load_policy(Path(policy))
+    if not set(ref["digest"] for ref in lock["packages"]).issubset(set(policy_data["trustedExecution"])):
+        fail("untrusted-package-execution", "policy")
+    suites = declarations(lock["packages"], manifests, context)
+    use_context = any("execution" in suite for suite in suites) or any(execution_options.values())
+    execution = Execution({**bindings(lock, assembly_digest, manifests, context), "context": context}, policy, logs.parent,
+                          forbidden_roots=[*roots.values(), logs.parent, *([application_root] if application_root else [])],
+                          **execution_options) if use_context else None
+    results, records = [], []
+    exhausted = None
+    for suite in suites:
+        suite_started = clock()
+        source = roots[suite["package"]] if suite["root"] == "package" else application_root
+        if exhausted is not None:
+            # A volume that filled during a check stops the remaining checks; each records the numbers that stopped it.
+            result = stopped_result(suite, exhausted, logs)
+            record = evidence_record(suite)
+        elif "execution" in suite:
+            result, record = execute(suite, source, allow_network, logs, execution, tool_selection=tool_selection, **adoption)
+        else:
+            started = clock()
+            result = execute_suite(suite, source, allow_network, logs, tool_selection=tool_selection, **adoption)
+            record = evidence_record(suite)
+            if result["status"] == "passed" or result["status"] == "failed" and result["exitCode"] is not None:
+                record.update(kind="local", startedAt=started, completedAt=clock(), phase="complete", checkStarted=True)
+            if result["reason"] == "cleanup-failed":
+                record["cleanup"] = {"required": True, "attempted": True, "completed": False, "reason": "cleanup-failed"}
+            for prerequisite in record["prerequisites"]:
+                prerequisite["reason"] = "unsupported-prerequisite"
+        results.append(result)
+        if "space" in result and result["status"] == "failed" and exhausted is None:
+            # The volume filled while a check ran. A check refused at admission blocks only itself: a smaller later
+            # check may still fit.
+            exhausted = result["space"]
+        if "class" in suite:
+            from .foundations import class_result_evidence
+            result["classEvidence"] = class_result_evidence(suite, source, suite_started, clock())
+        records.append(record)
+    report = {"format": REPORT_FORMAT, "context": context, "lockDigest": digest(canonical(lock)), "assemblyDigest": assembly_digest,
+            "packages": package_records(lock), "suiteSetDigest": digest(canonical(suites)), "suites": results,
+            "summary": summary(results)}
+    return execution.publish(report, records) if execution else report
+
+
+def transaction_path(root):
+    root = Path(root).absolute()
+    return root.parent / ("." + root.name + ".clod-transaction")
+
+
+@guarded
+def verify_application(root: Path, policy: Path, trusted: bool, *, allow_network: bool = False,
+                       execution_context=None, authorization=None, execution_state=None, secrets=None, allow_live=False,
+                       tool_selection=None, adoption_root=None) -> Report:
+    from .private_process import adoption_root as validate_adoption_root
+    require_selection(tool_selection)
+    adoption_root = validate_adoption_root(adoption_root)
+    root = Path(root)
+    assembly, manifests = retained_manifests(root, policy)
+    evidence = transaction_path(root) / "verification"
+    if linked(evidence.parent) or linked(evidence):
+        fail("symlink", "verification")
+    report = make_report(assembly["lock"], digest(canonical(assembly)), manifests,
+                         {key: root / ".clod/packages" / key for key in manifests}, root, policy, trusted,
+                         allow_network, "application", evidence / "logs", tool_selection=tool_selection, adoption_root=adoption_root, execution_context=execution_context,
+                         authorization=authorization, execution_state=execution_state, secrets=secrets, allow_live=allow_live)
+    write(evidence / (digest(canonical(report)) + ".json"), report)
+    return report
+
+
+@guarded
+def review_package(ref, store: Path, policy: Path, trusted: bool, *, allow_network: bool = False,
+                   execution_context=None, authorization=None, execution_state=None, secrets=None, allow_live=False,
+                   tool_selection=None, adoption_root=None) -> Report:
+    from .bundle import extract_review, read_package, resolve
+    from .private_process import adoption_root as validate_adoption_root
+
+    require_selection(tool_selection)
+    adoption_root = validate_adoption_root(adoption_root)
+
+    if trusted is not True:
+        fail("trusted-execution-required", TRUSTED)
+    store = Path(store)
+    manifest, _ = read_package(ref, store)
+    lock = resolve([{key: ref[key] for key in ("name", "version")}], store / "catalogue.json",
+                   "review/" + ref["name"], digest(canonical(manifest)))
+    refs = [{key: item[key] for key in ("name", "version", "digest")} for item in lock["packages"]]
+    from .ledger import tracked
+    holder = tempfile.TemporaryDirectory(prefix="clod-review-")
+    with tracked(holder.name, "review", purpose="review " + ref["name"]), holder as directory:
+        roots, manifests = {}, {}
+        for item in refs:
+            root = Path(directory).resolve() / item["digest"]
+            manifests[item["digest"]] = extract_review(item, store, root, Path(policy))
+            roots[item["digest"]] = root
+        report = make_report(lock, digest(canonical({"packages": refs})), manifests, roots, None, policy, trusted,
+                             allow_network, "review", store / "logs", tool_selection=tool_selection, adoption_root=adoption_root, execution_context=execution_context,
+                             authorization=authorization, execution_state=execution_state, secrets=secrets, allow_live=allow_live)
+    report_path = store / "reports" / (digest(canonical(report)) + ".json")
+    if report_path.exists() and load(report_path) != report:
+        fail("immutable-report", "report")
+    write(report_path, report)
+    return report

@@ -8,11 +8,11 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from aepm.bundle import extract_review, pack, validate_extracted_mode, validate_windows_paths
-from aepm.model import (AepmError, canonical, digest, execution_document, validate_absolute_path,
+from clod.bundle import extract_review, pack, validate_extracted_mode, validate_windows_paths
+from clod.model import (ClodError, canonical, digest, execution_document, validate_absolute_path,
                         validate_component, validate_execution_assertions,
                         validate_execution_context)
-from aepm.trust import (EXECUTION_AUTHORIZATION, RELEASE, UPDATE_APPROVAL, authorization_statement, key_id, pae,
+from clod.trust import (EXECUTION_AUTHORIZATION, RELEASE, UPDATE_APPROVAL, authorization_statement, key_id, pae,
                         review_bindings, sign, validate_report_evidence, validate_statement, verify, verify_package)
 from tests.core import test_core as core
 
@@ -31,7 +31,7 @@ class ExecutionEvidenceTests(unittest.TestCase):
     update = core.CoreTests.update
 
     def build(self, *, windows=False, android=False, authorized=True):
-        self.component["format"] = 3
+        self.component["format"] = 4
         for suite in self.component["verification"]:
             suite["execution"] = local_execution()
         native = self.component["verification"][1]
@@ -93,9 +93,9 @@ class ExecutionEvidenceTests(unittest.TestCase):
                              "exitCode": 0 if started else None, "seconds": 1, "reason": "" if started else "context-missing", "logDigest": digest(b""),
                             "storage": {"writtenBytes": 0, "keptBytes": 0}, "locks": []})
             if "class" in suite:
-                from aepm.foundations import class_result_evidence
+                from clod.foundations import class_result_evidence
                 results[-1]["classEvidence"] = class_result_evidence(suite, self.source, 1002, 1003)
-        self.report = {"format": 2, "context": "review", **{k: self.binding[k] for k in ("lockDigest", "assemblyDigest", "packages", "suiteSetDigest")},
+        self.report = {"format": 4, "context": "review", **{k: self.binding[k] for k in ("lockDigest", "assemblyDigest", "packages", "suiteSetDigest")},
                        "suites": results, "summary": {"required-local": "passed", "platform": "passed" if authorized else "blocked", "deployed": "not-applicable"},
                        "execution": {"runId": self.run_id, "mode": "local", "simulationKind": None, "contextDigest": self.context_digest,
                                      "authorizationDigest": authorization_digest, "evidenceDigest": "0" * 64, "startedAt": 1001, "completedAt": 1004}}
@@ -161,32 +161,32 @@ class ExecutionEvidenceTests(unittest.TestCase):
         statement, signer = verify(envelope, "owner", self.policy, EXECUTION_AUTHORIZATION)
         self.assertEqual((statement["predicateType"], signer), (EXECUTION_AUTHORIZATION, self.authorization["keyId"]))
         self.assertEqual(statement["subject"], [{"name": "assembly", "digest": {"sha256": self.binding["assemblyDigest"]}}])
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             verify(envelope, "guardian", self.policy, "https://slsa.dev/verification_summary/v1")
-        with self.assertRaisesRegex(AepmError, "statement-role"):
+        with self.assertRaisesRegex(ClodError, "statement-role"):
             verify(envelope, "owner", self.policy, UPDATE_APPROVAL)
         bad = {**statement, "predicateType": UPDATE_APPROVAL}
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             sign(bad, "owner", self.root / "owner.pem")
-        from aepm.trust import _crypto
+        from clod.trust import _crypto
         payload = canonical(statement)
         envelope_value = json.loads(envelope)
-        for message in (payload, pae("application/json", payload), b"aepm/owner/2\n" + payload):
+        for message in (payload, pae("application/json", payload), b"clod/owner/2\n" + payload):
             forged = {**envelope_value, "signatures": [{**envelope_value["signatures"][0],
                                                         "sig": _crypto("sign", self.keys["owner"]["privateKey"], message).decode()}]}
-            with self.subTest(message=message[:16]), self.assertRaises(AepmError):
+            with self.subTest(message=message[:16]), self.assertRaises(ClodError):
                 verify(canonical(forged), "owner", self.policy, EXECUTION_AUTHORIZATION)
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             validate_statement(statement, RELEASE)
 
     def test_report_downgrade_and_missing_evidence(self):
         self.build()
         stripped = copy.deepcopy(self.report)
-        stripped["format"] = 1
+        stripped["format"] = 3
         del stripped["execution"]
-        with self.assertRaisesRegex(AepmError, "report-downgrade"):
+        with self.assertRaisesRegex(ClodError, "report-downgrade"):
             validate_report_evidence(stripped, self.binding, "review", None, None)
-        with self.assertRaisesRegex(AepmError, "evidence-required"):
+        with self.assertRaisesRegex(ClodError, "evidence-required"):
             validate_report_evidence(self.report, self.binding, "review", None, None)
 
     def test_no_context_external_checks_stay_blocked(self):
@@ -194,7 +194,7 @@ class ExecutionEvidenceTests(unittest.TestCase):
         self.check()
         self.evidence["suites"][0]["kind"] = "native"
         self.publish()
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             self.check()
 
     def test_exact_suite_and_assertion_coverage(self):
@@ -212,7 +212,7 @@ class ExecutionEvidenceTests(unittest.TestCase):
             self.evidence = copy.deepcopy(original)
             mutate(self.evidence)
             self.publish()
-            with self.subTest(mutate=mutate), self.assertRaises(AepmError):
+            with self.subTest(mutate=mutate), self.assertRaises(ClodError):
                 self.check()
 
     def test_altered_bindings_and_canonical_documents(self):
@@ -221,13 +221,13 @@ class ExecutionEvidenceTests(unittest.TestCase):
             original = self.evidence[key]
             self.evidence[key] = "f" * 64
             self.publish()
-            with self.subTest(key=key), self.assertRaises(AepmError):
+            with self.subTest(key=key), self.assertRaises(ClodError):
                 self.check()
             self.evidence[key] = original
         self.publish()
         context_path = self.store / "contexts" / (self.context_digest + ".json")
         context_path.write_bytes(context_path.read_bytes() + b" ")
-        with self.assertRaisesRegex(AepmError, "evidence-digest"):
+        with self.assertRaisesRegex(ClodError, "evidence-digest"):
             self.check()
 
     def test_historical_windows_paths_on_posix_and_adoption_host(self):
@@ -236,10 +236,10 @@ class ExecutionEvidenceTests(unittest.TestCase):
         self.guardian(self.ref, self.report)
         verify_package(self.ref, self.store, self.policy)
         if os.name != "nt":
-            with self.assertRaisesRegex(AepmError, "unsupported-host"):
+            with self.assertRaisesRegex(ClodError, "unsupported-host"):
                 self.check(adoption=True)
         for path in ("C:relative", "\\root-relative", "C:\\proof\\..\\state", "\\\\server\\share", "C:\\proof\\file:stream", "c:\\proof", "C:\\proof\\CON"):
-            with self.subTest(path=path), self.assertRaises(AepmError):
+            with self.subTest(path=path), self.assertRaises(ClodError):
                 validate_absolute_path(path, "windows")
         self.assertEqual(validate_absolute_path("C:\\", "windows"), "C:\\")
 
@@ -248,17 +248,17 @@ class ExecutionEvidenceTests(unittest.TestCase):
         key = self.completion()
         self.check(adoption=True)
         self.check(now=2000)
-        with self.assertRaisesRegex(AepmError, "authorization-expired"):
+        with self.assertRaisesRegex(ClodError, "authorization-expired"):
             self.check(adoption=True, now=2000)
         completion_path = self.registry / "completions" / (key + ".json")
         value = json.loads(completion_path.read_text())
         for field in ("reportDigest", "evidenceDigest", "authorizationDigest", "runId", "keyId", "completedAt"):
             changed = {**value, field: 1005 if field == "completedAt" else "f" * 64}
             completion_path.write_bytes(canonical(changed))
-            with self.subTest(field=field), self.assertRaises(AepmError):
+            with self.subTest(field=field), self.assertRaises(ClodError):
                 self.check(adoption=True)
         completion_path.unlink()
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             self.check(adoption=True)
 
     def test_registry_replacement_claim_and_future_time(self):
@@ -267,13 +267,13 @@ class ExecutionEvidenceTests(unittest.TestCase):
         claim = self.registry / "claims" / (key + ".json")
         data = json.loads(claim.read_text())
         claim.write_bytes(canonical({**data, "claimedAt": 1002}))
-        with self.assertRaisesRegex(AepmError, "claim-binding"):
+        with self.assertRaisesRegex(ClodError, "claim-binding"):
             self.check(adoption=True)
         claim.write_bytes(canonical(data))
         (self.registry / "registry.json").write_bytes(canonical({"format": 1, "id": "f" * 64}))
-        with self.assertRaisesRegex(AepmError, "registry-binding"):
+        with self.assertRaisesRegex(ClodError, "registry-binding"):
             self.check(adoption=True)
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             self.check(now=900)
 
     def test_incomplete_cleanup_and_substituted_ownership(self):
@@ -287,12 +287,12 @@ class ExecutionEvidenceTests(unittest.TestCase):
             self.evidence["suites"][0]["ownedResources"] = [owned]
             self.evidence["suites"][0]["cleanup"] = {"required": True, "attempted": True, "completed": True, "reason": ""}
             self.publish()
-            with self.assertRaises(AepmError):
+            with self.assertRaises(ClodError):
                 self.check()
         self.evidence = original
         self.evidence["suites"][0]["cleanup"] = {"required": True, "attempted": True, "completed": False, "reason": "cleanup-failed"}
         self.publish()
-        with self.assertRaisesRegex(AepmError, "evidence-verdict"):
+        with self.assertRaisesRegex(ClodError, "evidence-verdict"):
             self.check()
 
     def test_simulation_cannot_pass_platform_scope(self):
@@ -301,14 +301,14 @@ class ExecutionEvidenceTests(unittest.TestCase):
         # A claimed simulation contradicts the signed native declaration and descriptor.
         self.evidence["suites"][0]["kind"] = "simulation"
         self.publish()
-        with self.assertRaisesRegex(AepmError, "execution-kind"):
+        with self.assertRaisesRegex(ClodError, "execution-kind"):
             self.check()
 
     def test_assertions_are_typed_and_process_termination_is_runner_owned(self):
         placeholder = [{"id": "process-tree-terminated", "passed": False, "actual": None}]
         validate_execution_assertions(placeholder, ["process-tree-terminated"], helper=True)
         claimed = [{"id": "process-tree-terminated", "passed": True, "actual": True}]
-        with self.assertRaisesRegex(AepmError, "runner-owned-assertion"):
+        with self.assertRaisesRegex(ClodError, "runner-owned-assertion"):
             validate_execution_assertions(claimed, ["process-tree-terminated"], helper=True)
         validate_execution_assertions(claimed, ["process-tree-terminated"])
 
@@ -319,7 +319,7 @@ class ExecutionEvidenceTests(unittest.TestCase):
                        lambda c: c["secrets"].update(livekitKey={"secretRef": "key", "version": "one", "value": "hidden"})):
             value = copy.deepcopy(self.descriptor)
             mutate(value)
-            with self.assertRaises(AepmError):
+            with self.assertRaises(ClodError):
                 validate_execution_context(value)
         original = copy.deepcopy(self.component)
         for mutate in (lambda e: e.update(extra=True), lambda e: e.update(assertions=[]),
@@ -329,7 +329,7 @@ class ExecutionEvidenceTests(unittest.TestCase):
                        lambda e: e.update(operations=["create-temporary-emulator", "native-test"])):
             value = copy.deepcopy(original)
             mutate(value["verification"][1]["execution"])
-            with self.assertRaises(AepmError):
+            with self.assertRaises(ClodError):
                 validate_component(value)
 
     @unittest.skipIf(os.name == "nt", "POSIX execute bits; tests.test_hosts covers Windows packing")
@@ -337,15 +337,15 @@ class ExecutionEvidenceTests(unittest.TestCase):
         path = self.source / "test.py"
         validate_extracted_mode(path, False)
         path.chmod(0o755)
-        with self.assertRaisesRegex(AepmError, "mode-mismatch"):
+        with self.assertRaisesRegex(ClodError, "mode-mismatch"):
             validate_extracted_mode(path, False)
-        with self.assertRaisesRegex(AepmError, "mode-mismatch"):
+        with self.assertRaisesRegex(ClodError, "mode-mismatch"):
             pack(self.source, self.store)
-        with patch("aepm.bundle.os.name", "nt"):
+        with patch("clod.bundle.os.name", "nt"):
             validate_extracted_mode(path, False)
         path.unlink()
         path.symlink_to(self.source / "NOTICE")
-        with self.assertRaisesRegex(AepmError, "unsafe-file"):
+        with self.assertRaisesRegex(ClodError, "unsafe-file"):
             validate_extracted_mode(path, False)
 
     def test_context_platform_channel_literal(self):
@@ -354,11 +354,11 @@ class ExecutionEvidenceTests(unittest.TestCase):
         validate_execution_context(descriptor)
         for platform, channel in (("web", "web"), ("browser", "direct"), ("android", "testflight")):
             descriptor["settings"] = {"updatePlatform": platform, "updateChannel": channel}
-            with self.subTest(platform=platform, channel=channel), self.assertRaises(AepmError):
+            with self.subTest(platform=platform, channel=channel), self.assertRaises(ClodError):
                 validate_execution_context(descriptor)
         for address in ("http://bad..host/l/id", "http://localhost/l/id%", "http://localhost/l/id%2fpart"):
             descriptor["settings"] = {"updatePlatform": "browser", "updateChannel": "web", "updateUrl": address}
-            with self.subTest(address=address), self.assertRaises(AepmError):
+            with self.subTest(address=address), self.assertRaises(ClodError):
                 validate_execution_context(descriptor)
 
     def test_resource_coverage_digest_and_kind(self):
@@ -371,7 +371,7 @@ class ExecutionEvidenceTests(unittest.TestCase):
             self.evidence = copy.deepcopy(original)
             mutate(self.evidence)
             self.publish()
-            with self.assertRaises(AepmError):
+            with self.assertRaises(ClodError):
                 self.check()
         self.evidence = original
         self.descriptor["resources"][0]["kind"] = "file"
@@ -379,7 +379,7 @@ class ExecutionEvidenceTests(unittest.TestCase):
         self.report["execution"]["contextDigest"] = self.evidence["contextDigest"] = self.authorization["contextDigest"]
         self.report["execution"]["authorizationDigest"] = self.evidence["authorizationDigest"] = self.retain_authorization()
         self.publish()
-        with self.assertRaisesRegex(AepmError, "resource-binding"):
+        with self.assertRaisesRegex(ClodError, "resource-binding"):
             self.check()
 
     def test_grants_cannot_escalate_or_borrow_another_suite(self):
@@ -393,7 +393,7 @@ class ExecutionEvidenceTests(unittest.TestCase):
             mutate(self.authorization)
             self.report["execution"]["authorizationDigest"] = self.evidence["authorizationDigest"] = self.retain_authorization()
             self.publish()
-            with self.assertRaises(AepmError):
+            with self.assertRaises(ClodError):
                 self.check()
 
     def test_resource_executable_limit_is_scoped_and_document_bound_remains(self):
@@ -405,14 +405,14 @@ class ExecutionEvidenceTests(unittest.TestCase):
             resource["executables"] = [f"bin/tool-{index:05d}" for index in range(count)]
             validate_execution_context(descriptor)
         resource["executables"].append("bin/tool-08192")
-        with self.assertRaisesRegex(AepmError, "metadata-limit"):
+        with self.assertRaisesRegex(ClodError, "metadata-limit"):
             validate_execution_context(descriptor)
-        with self.assertRaisesRegex(AepmError, "metadata-limit"):
+        with self.assertRaisesRegex(ClodError, "metadata-limit"):
             execution_document({"unrelated": [0] * 257}, "fixture", resource_executables=True)
-        with self.assertRaisesRegex(AepmError, "metadata-limit"):
+        with self.assertRaisesRegex(ClodError, "metadata-limit"):
             execution_document({"resources": [{"unrelated": [0] * 257}]}, "fixture", resource_executables=True)
         resource["executables"] = ["bin/" + "a" * 200 + f"-{index:05d}" for index in range(8192)]
-        with self.assertRaisesRegex(AepmError, "metadata-limit"):
+        with self.assertRaisesRegex(ClodError, "metadata-limit"):
             validate_execution_context(descriptor)
 
     def test_inventory_root_relation_and_closed_resource_scope(self):
@@ -427,7 +427,7 @@ class ExecutionEvidenceTests(unittest.TestCase):
                        lambda r: r.update(path="/other/Contents/Developer"), lambda r: r.update(kind="file")):
             descriptor = copy.deepcopy(original)
             mutate(descriptor["resources"][0])
-            with self.assertRaisesRegex(AepmError, "invalid-inventory-root"):
+            with self.assertRaisesRegex(ClodError, "invalid-inventory-root"):
                 validate_execution_context(descriptor)
         descriptor = copy.deepcopy(original)
         descriptor["pathPlatform"] = "windows"
@@ -458,14 +458,14 @@ class ExecutionEvidenceTests(unittest.TestCase):
         for delivery in ("http://play.example", "https://user@play.example", "https://play.example/path",
                          "https://play.example?query=fixture", "https://play.example#fragment", "wss://play.example"):
             descriptor["settings"]["updateDeliveryOrigin"] = delivery
-            with self.subTest(delivery=delivery), self.assertRaises(AepmError):
+            with self.subTest(delivery=delivery), self.assertRaises(ClodError):
                 validate_execution_context(descriptor)
         descriptor["settings"]["updateDeliveryOrigin"] = "https://play.example"
         for field, value in (("updateUrl", "https://play.example/l/example-id"),
                              ("updateReadOrigin", "https://play.example"), ("livekitUrl", "wss://play.example")):
             changed = copy.deepcopy(descriptor)
             changed["settings"][field] = value
-            with self.subTest(operation=field), self.assertRaisesRegex(AepmError, "invalid-simulation-origin"):
+            with self.subTest(operation=field), self.assertRaisesRegex(ClodError, "invalid-simulation-origin"):
                 validate_execution_context(changed)
 
     def test_windows_archive_names_rejected_before_extraction_writes(self):
@@ -473,11 +473,11 @@ class ExecutionEvidenceTests(unittest.TestCase):
                    "CONIN$", "CONOUT$.txt", "nested/aux/file.txt", "CON .txt",
                    "name.", "name ", "directory./file.txt", "directory /file.txt", "wild?.txt"]
         for path in invalid:
-            with self.subTest(path=path), self.assertRaises(AepmError):
+            with self.subTest(path=path), self.assertRaises(ClodError):
                 validate_windows_paths(["component.json", path])
         validate_windows_paths(["component.json", "console.txt", "auxiliary/file.txt", "COM10.txt"])
         for paths in (["name", "name."], ["directory/file", "directory /other"], ["a/file", "A/other"]):
-            with self.subTest(paths=paths), self.assertRaises(AepmError):
+            with self.subTest(paths=paths), self.assertRaises(ClodError):
                 validate_windows_paths(paths)
         if os.name == "nt":
             self.skipTest("Unix fixture creation required for Windows-incompatible archive names")
@@ -488,7 +488,7 @@ class ExecutionEvidenceTests(unittest.TestCase):
         ref = pack(self.source, self.store)
         self.release(ref)
         destination = self.root / "must-not-exist" / "extracted"
-        with patch("aepm.bundle.os.name", "nt"), self.assertRaisesRegex(AepmError, "unsafe-windows-path"):
+        with patch("clod.bundle.os.name", "nt"), self.assertRaisesRegex(ClodError, "unsafe-windows-path"):
             extract_review(ref, self.store, destination, self.policy)
         self.assertFalse(destination.parent.exists())
         extract_review(ref, self.store, self.root / "unix-extraction", self.policy)

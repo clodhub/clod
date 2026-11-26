@@ -11,12 +11,12 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from aepm.__main__ import main
-from aepm.bundle import pack
-from aepm.doctor import doctor
-from aepm.io import write
-from aepm.model import AepmError, validate_component
-from aepm.toolchains import merge_toolchains, probe_version, validate_tool
+from clod.__main__ import main
+from clod.bundle import pack
+from clod.doctor import doctor
+from clod.io import write
+from clod.model import ClodError, validate_component
+from clod.toolchains import merge_toolchains, probe_version, validate_tool
 from tests.core.test_core import fixture
 
 
@@ -40,7 +40,7 @@ def package(root, name, toolchains, *, recipe=False, dependencies=None):
     if recipe:
         manifest.update(kind="recipe", implements=[], classes=[])
         manifest["artefacts"][0]["destination"] = "run.sh"
-        write(root / "recipe.json", {"format": 2, "name": "clodhub/" + name, "version": "0.1.0", "title": "Game", "components": [],
+        write(root / "recipe.json", {"format": 3, "name": "pkg:clod/com.clodhub/" + name, "version": "0.1.0", "title": "Game", "components": [],
                                       "questions": QUESTIONS, "connections": [], "tests": {"defaultAnswers": {}, "answerSets": []}})
         manifest["files"].append({"path": "recipe.json", "executable": False})
         manifest["files"].sort(key=lambda item: item["path"])
@@ -78,13 +78,13 @@ class DoctorTests(unittest.TestCase):
 
     def build(self):
         package(self.root / "renderer", "renderer", self.component_tools)
-        package(self.root / "game", "game", {"web": [NODE], "ios": [XCODE]}, recipe=True,
-                dependencies=[{"name": "clodhub/renderer", "version": "0.1.0"}])
+        package(self.root / "game", "game-recipe", {"web": [NODE], "ios": [XCODE]}, recipe=True,
+                dependencies=[{"name": "pkg:clod/com.clodhub/renderer", "version": "0.1.0"}])
         pack(self.root / "renderer", self.store)
         pack(self.root / "game", self.store)
 
     def run_doctor(self, host, answers=None, **options):
-        return doctor("clodhub/game", "0.1.0", self.store, answers or {}, host="macos", which=host.which, runner=host.run,
+        return doctor("pkg:clod/com.clodhub/game-recipe", "0.1.0", self.store, answers or {}, host="macos", which=host.which, runner=host.run,
                       installer=host.install, **options)
 
     def test_versions_parse_from_real_output_shapes(self):
@@ -132,31 +132,31 @@ class DoctorTests(unittest.TestCase):
         self.build()
         host = Host({})
         for name, expected in (("windows", None), ("linux", ["sudo", "apt-get", "install", "--yes", "xcodegen"])):
-            report = doctor("clodhub/game", "0.1.0", self.store, {}, host=name, which=host.which, runner=host.run)
+            report = doctor("pkg:clod/com.clodhub/game-recipe", "0.1.0", self.store, {}, host=name, which=host.which, runner=host.run)
             self.assertEqual(next(item for item in report["tools"] if item["name"] == "xcodegen")["install"], expected)
 
     def test_conflicting_ranges_and_definitions_are_errors(self):
         self.component_tools = {"web": [{**NODE, "versionRange": "<20.0.0"}], "ios": [XCODEGEN]}
         self.build()
-        with self.assertRaisesRegex(AepmError, "toolchain-conflict"):
+        with self.assertRaisesRegex(ClodError, "toolchain-conflict"):
             self.run_doctor(Host({}))
         conflicting = {**NODE, "probe": ["node", "-v"]}
-        first = {"identity": {"name": "clodhub/a"}, "toolchains": {"web": [NODE]}}
-        second = {"identity": {"name": "clodhub/b"}, "toolchains": {"web": [conflicting]}}
-        with self.assertRaisesRegex(AepmError, "toolchain-definition-conflict"):
+        first = {"identity": {"name": "pkg:clod/com.clodhub/a"}, "toolchains": {"web": [NODE]}}
+        second = {"identity": {"name": "pkg:clod/com.clodhub/b"}, "toolchains": {"web": [conflicting]}}
+        with self.assertRaisesRegex(ClodError, "toolchain-definition-conflict"):
             merge_toolchains([first, second])
         self.assertEqual([item["name"] for item in merge_toolchains([first, second], ["ios"])], [])
 
     def test_graph_validation_merges_only_selected_targets(self):
         self.component_tools = {"web": [{**NODE, "versionRange": "<20.0.0"}], "ios": [XCODEGEN]}
         self.build()
-        from aepm.bundle import read_package
-        from aepm.foundations import validate_graph
-        from aepm.io import load
+        from clod.bundle import read_package
+        from clod.foundations import validate_graph
+        from clod.io import load
         manifests = [read_package(entry, self.store)[0] for entry in load(self.store / "catalogue.json")["entries"]]
         validate_graph(manifests)
         validate_graph(manifests, ["ios"])
-        with self.assertRaisesRegex(AepmError, "toolchain-conflict"):
+        with self.assertRaisesRegex(ClodError, "toolchain-conflict"):
             validate_graph(manifests, ["web"])
 
     def test_strict_tool_declarations(self):
@@ -169,14 +169,14 @@ class DoctorTests(unittest.TestCase):
                        lambda t: t.update(install={"macos": None, "windows": None, "linux": None}, manual=None)):
             changed = deepcopy(NODE)
             change(changed)
-            with self.subTest(changed=changed), self.assertRaises(AepmError):
+            with self.subTest(changed=changed), self.assertRaises(ClodError):
                 validate_tool(changed)
         manifest = fixture(self.root / "strict", "strict")
         validate_component(manifest)
         for toolchains in ({}, {"web": [], "ios": []}, {"web": [NODE, NODE]}, {"web": None}):
-            with self.subTest(toolchains=toolchains), self.assertRaises(AepmError):
+            with self.subTest(toolchains=toolchains), self.assertRaises(ClodError):
                 validate_component({**manifest, "toolchains": toolchains})
-        with self.assertRaisesRegex(AepmError, "toolchain-definition-conflict"):
+        with self.assertRaisesRegex(ClodError, "toolchain-definition-conflict"):
             validate_component({**manifest, "platforms": ["server", "web"], "toolchains": {"web": [NODE], "server": [{**NODE, "manual": "Other"}]}})
 
     @unittest.skipIf(os.name == "nt", "Fake shell-script tools and installers need a POSIX shell")
@@ -200,7 +200,7 @@ class DoctorTests(unittest.TestCase):
         def command(*extra):
             output, errors = io.StringIO(), io.StringIO()
             with patch.dict(os.environ, {"PATH": str(bin_path)}), contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
-                code = main(["doctor", "game@0.1.0", "--store", str(self.store), "--answers", str(answers), *extra])
+                code = main(["doctor", "game-recipe@0.1.0", "--store", str(self.store), "--answers", str(answers), *extra])
             return code, json.loads(output.getvalue()), errors.getvalue()
 
         code, value, _ = command()
@@ -225,7 +225,7 @@ class DoctorTests(unittest.TestCase):
         answers = self.root / "answers.json"
         write(answers, {"targets": []})
         with contextlib.redirect_stdout(io.StringIO()) as output:
-            code = main(["doctor", "game@0.1.0", "--store", str(self.store), "--answers", str(answers)])
+            code = main(["doctor", "game-recipe@0.1.0", "--store", str(self.store), "--answers", str(answers)])
         self.assertEqual((code, json.loads(output.getvalue())), (1, {"ok": False, "errors": [{"code": "invalid-answer", "path": "answers.targets"}]}))
 
 

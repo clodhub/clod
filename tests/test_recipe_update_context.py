@@ -7,14 +7,14 @@ import shutil
 import tempfile
 import unittest
 
-from aepm.authorization import execution_request, authorize_execution
-from aepm.bundle import pack, read_package
-from aepm.environment import clock
-from aepm.io import load, write
-from aepm.model import AepmError, canonical, digest
-from aepm.test_identities import generate
-from aepm.trust import publish_release, publish_review, review_bindings, sign, validate_report_evidence, verify_package
-from aepm.verification import review_package
+from clod.authorization import execution_request, authorize_execution
+from clod.bundle import pack, read_package
+from clod.environment import clock
+from clod.io import load, write
+from clod.model import ClodError, canonical, digest
+from clod.test_identities import generate
+from clod.trust import publish_release, publish_review, review_bindings, sign, validate_report_evidence, verify_package
+from clod.verification import review_package
 from tests.core.test_core import fixture
 
 
@@ -28,10 +28,10 @@ process.on('exit', () => { if (replies !== 1) process.exitCode = 1; });
 """
 
 
-@unittest.skipUnless(os.environ.get("AEPM_RECIPE_SOURCE"), "Set AEPM_RECIPE_SOURCE for actual source-byte integration")
+@unittest.skipUnless(os.environ.get("CLOD_RECIPE_SOURCE"), "Set CLOD_RECIPE_SOURCE for actual source-byte integration")
 class RecipeUpdateContextTests(unittest.TestCase):
     def test_public_private_desktop_and_testflight_through_signed_context(self):
-        repository = Path(os.environ["AEPM_RECIPE_SOURCE"]).resolve()
+        repository = Path(os.environ["CLOD_RECIPE_SOURCE"]).resolve()
         workspace = repository.parent
         paths = {
             "verification/update-runner.mjs": repository / "recipe/verification/update-runner.mjs",
@@ -49,7 +49,7 @@ class RecipeUpdateContextTests(unittest.TestCase):
                  ("windows-private", "desktop-private", "windows", "direct", "https://delivery.example", "2.1.0"),
                  ("testflight-public", "public", "ios", "testflight", "https://testflight.apple.com", "1.9.0"),
                  ("testflight-private", "private", "ios", "testflight", "https://testflight.apple.com", "1.9.0")]
-        with tempfile.TemporaryDirectory(prefix="aepm-recipe-context-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="clod-recipe-context-") as temporary:
             root = Path(temporary).resolve()
             policy_path = generate(root / "keys")
             policy = load(policy_path)
@@ -57,7 +57,7 @@ class RecipeUpdateContextTests(unittest.TestCase):
             for name, route, platform, channel, delivery, version in cases:
                 package = root / name
                 manifest = fixture(package, "fixture-" + name)
-                manifest["format"] = 3
+                manifest["format"] = 4
                 manifest["artefacts"][0]["destination"] = "components/fixture-" + name + "/run.sh"
                 manifest["verification"] = manifest["verification"][:1]
                 manifest["verification"][0]["execution"] = {"kind": "local", "simulation": False, "operations": [], "settings": [],
@@ -126,12 +126,12 @@ class RecipeUpdateContextTests(unittest.TestCase):
                 changed = load(retained_context)
                 changed["settings"]["updateDeliveryOrigin"] = "https://substituted.example"
                 write(retained_context, changed)
-                with self.assertRaises(AepmError):
+                with self.assertRaises(ClodError):
                     verify_package(ref, store, policy_path)
                 retained_context.write_bytes(original)
                 reports.append({"case": name, "ref": ref, "report": report, "evidence": evidence, "deliveryTamperRejected": True,
                                 "realNetworkGuarded": True, "fixtureEndpointReadsPerSuite": 1})
-            evidence_path = os.environ.get("AEPM_RECIPE_EVIDENCE")
+            evidence_path = os.environ.get("CLOD_RECIPE_EVIDENCE")
             if evidence_path:
                 preserved_store = Path(evidence_path + ".store").resolve()
                 self.assertFalse(Path(evidence_path).exists(), "Preserve earlier evidence; choose a fresh output")
@@ -146,10 +146,10 @@ class RecipeUpdateContextTests(unittest.TestCase):
                 verify_package(ref, preserved_store, preserved_store / "policy.json")
 
 
-@unittest.skipUnless(os.environ.get("AEPM_RECIPE_RECHECK"), "Set AEPM_RECIPE_RECHECK for preserved signed evidence only")
+@unittest.skipUnless(os.environ.get("CLOD_RECIPE_RECHECK"), "Set CLOD_RECIPE_RECHECK for preserved signed evidence only")
 class RetainedRecipeEvidenceTests(unittest.TestCase):
     def test_independent_signatures_after_temporary_keys_and_registry_removed(self):
-        evidence = load(Path(os.environ["AEPM_RECIPE_RECHECK"]).resolve())
+        evidence = load(Path(os.environ["CLOD_RECIPE_RECHECK"]).resolve())
         store = Path(evidence["store"]).resolve()
         self.assertEqual(len(evidence["reviews"]), 6)
         for result in evidence["reviews"]:

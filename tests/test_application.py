@@ -9,18 +9,18 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from aepm import update
-from aepm.__main__ import main
-from aepm.application import assemble, configuration, installed_artefacts, read_assembly, requirements, substitute, validate_definition
-from aepm.bundle import pack, read_package, resolve
-from aepm.export import export_design
-from aepm.io import load, snapshot, write
-from aepm.model import AepmError, canonical, digest
-from aepm.test_identities import generate
-from aepm.trust import (RELEASE, publish_release, publish_review, release_statement, review_bindings, sign, verify,
+from clod import update
+from clod.__main__ import main
+from clod.application import assemble, configuration, installed_artefacts, read_assembly, requirements, substitute, validate_definition
+from clod.bundle import pack, read_package, resolve
+from clod.export import export_design
+from clod.io import load, snapshot, write
+from clod.model import ClodError, canonical, digest
+from clod.test_identities import generate
+from clod.trust import (RELEASE, publish_release, publish_review, release_statement, review_bindings, sign, verify,
                         verify_package)
-from aepm.verification import check_report, retained_manifests, review_package, verify_application
-from aepm.verification import execute_suite
+from clod.verification import check_report, retained_manifests, review_package, verify_application
+from clod.verification import execute_suite
 from tests.core.test_core import PYTHON, fixture
 
 
@@ -34,9 +34,9 @@ def source(root, name, version="0.1.0", recipe=False):
     manifest["verification"][1]["requirements"] = ["external:native-host"]
     manifest["kind"] = "recipe" if recipe else "component"
     manifest["collect"] = [{"id": "count", "type": "integer", "grammar": "integer", "required": True, "secret": False, "default": 7}]
-    visual = {"id": "clodhub." + name, "name": name, "kind": "application" if recipe else "component", "status": "example",
+    visual = {"id": "com.clodhub." + name, "name": name, "kind": "application" if recipe else "component", "status": "example",
               "ports": [], "settings": [{"id": "count", "name": "Count", "type": "number", "required": True, "secret": False, "default": 7}]}
-    visual.update({"revision": version} if recipe else {"package": "clodhub/" + name, "version": version})
+    visual.update({"revision": version} if recipe else {"package": "pkg:clod/com.clodhub/" + name, "version": version})
     write(root / "visual.json", visual)
     (root / "source.txt").write_text("count={{count}}\nversion=" + version + "\n")
     manifest["files"].append({"path": "source.txt", "executable": False})
@@ -59,7 +59,7 @@ class ApplicationTests(unittest.TestCase):
         cls.policy = generate(cls.identities)
         cls.store = cls.base / "store"
         cls.refs = []
-        for name, version, recipe in (("sample", "0.1.0", False), ("sample", "0.1.1", False), ("recipe", "0.1.0", True)):
+        for name, version, recipe in (("sample", "0.1.0", False), ("sample", "0.1.1", False), ("sample-recipe", "0.1.0", True)):
             directory = cls.base / (name + version)
             source(directory, name, version, recipe)
             ref = pack(directory, cls.store)
@@ -82,8 +82,8 @@ class ApplicationTests(unittest.TestCase):
             statements = cls.store / "statements" / ref["digest"]
             publish_review(cls.store, ref, report, cls.identities / "guardian.pem", policy=cls.policy)
             verify_package(ref, cls.store, cls.policy)
-        cls.definition = {"format": 2, "id": "sample-app", "title": "Sample", "recipe": {"name": "clodhub/recipe", "version": "0.1.0"},
-                          "components": [{"id": "sample", "name": "clodhub/sample", "version": "0.1.0", "configuration": {}}],
+        cls.definition = {"format": 3, "id": "sample-app", "title": "Sample", "recipe": {"name": "pkg:clod/com.clodhub/sample-recipe", "version": "0.1.0"},
+                          "components": [{"id": "sample", "name": "pkg:clod/com.clodhub/sample", "version": "0.1.0", "configuration": {}}],
                           "configuration": {}, "design": {"definitions": [], "instances": [], "connections": []}, "updatePolicy": {"security": "auto", "features": "manual", "preview": "hold"}}
         cls.lock = resolve(requirements(cls.definition), cls.store / "catalogue.json", cls.definition["id"], digest(canonical(cls.definition)))
         cls.assembly = assemble(cls.definition, cls.lock, cls.store, cls.base / "baseline", cls.policy)
@@ -114,7 +114,7 @@ class ApplicationTests(unittest.TestCase):
         self.store = self.root / "store"
         shutil.copytree(type(self).store, self.store)
         directory = self.root / "recipe"
-        manifest = source(directory, "recipe", "0.1.1", True)
+        manifest = source(directory, "sample-recipe", "0.1.1", True)
         mutate(manifest)
         write(directory / "component.json", manifest)
         ref = pack(directory, self.store)
@@ -161,7 +161,7 @@ class ApplicationTests(unittest.TestCase):
                          lambda r: r["suites"].append({**r["suites"][0], "id": "extra"})):
             changed = deepcopy(report)
             mutation(changed)
-            with self.assertRaises(AepmError):
+            with self.assertRaises(ClodError):
                 check_report(changed, assembly["lock"], digest(canonical(assembly)), manifests)
 
     def test_retained_class_files_are_required_and_digest_bound(self):
@@ -169,15 +169,15 @@ class ApplicationTests(unittest.TestCase):
         assembly, manifests = retained_manifests(self.app, self.policy)
         report = verify_application(self.app, self.policy, True)
         check_report(report, assembly["lock"], digest(canonical(assembly)), manifests)
-        ref = next(item for item in assembly["lock"]["packages"] if item["name"] == "clodhub/sample")
-        retained = self.app / ".aepm/packages" / ref["digest"] / "class-check.py"
+        ref = next(item for item in assembly["lock"]["packages"] if item["name"] == "pkg:clod/com.clodhub/sample")
+        retained = self.app / ".clod/packages" / ref["digest"] / "class-check.py"
         original = retained.read_bytes()
         for change, code in ((lambda: retained.write_bytes(b"assert True\n"), "retained-source"),
                              (retained.unlink, "retained-membership")):
             change()
-            with self.subTest(code=code), self.assertRaisesRegex(AepmError, code):
+            with self.subTest(code=code), self.assertRaisesRegex(ClodError, code):
                 retained_manifests(self.app, self.policy)
-            with self.assertRaises(AepmError):
+            with self.assertRaises(ClodError):
                 verify_application(self.app, self.policy, True)
             retained.write_bytes(original)
             retained.chmod(0o644)
@@ -186,44 +186,44 @@ class ApplicationTests(unittest.TestCase):
     def test_configuration_delimiters_types_and_single_pass(self):
         declaration = [{"id": "value", "type": "string", "grammar": "label", "required": True, "secret": False}]
         for value in ('bad"', "bad'", "bad$", "bad`", "bad\\", "bad\n", "{{other}}", "{{value}}", "bad{", "bad}"):
-            with self.subTest(value=value), self.assertRaises(AepmError):
+            with self.subTest(value=value), self.assertRaises(ClodError):
                 configuration(declaration, {"value": value})
         values = configuration(declaration, {"value": "Safe Label"})
         self.assertEqual(substitute('"{{value}}"', declaration, values), '"Safe Label"')
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             substitute("const name = {{value}}", declaration, values)
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             substitute('echo "{{value}}"', declaration, values, shell=True)
         for text in ("{{unknown}}", "{{ value }}", "{{value}", "{{{value}}}"):
-            with self.assertRaises(AepmError):
+            with self.assertRaises(ClodError):
                 substitute(text, declaration, values)
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             substitute("{{value}}", declaration, values, destination=True)
         integer = [{"id": "count", "type": "integer", "grammar": "integer", "required": True, "secret": False}]
         for value in (True, 1.5, "1", 2 ** 31):
-            with self.assertRaises(AepmError):
+            with self.assertRaises(ClodError):
                 configuration(integer, {"count": value})
 
     def test_untrusted_and_retained_edits_rejected(self):
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             verify_application(self.app, self.policy, False)
         policy = load(self.policy)
         policy["trustedExecution"] = []
         write(self.root / "policy.json", policy)
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             verify_application(self.app, self.root / "policy.json", True)
         ref = self.refs[0]
-        (self.app / ".aepm/packages" / ref["digest"] / "test.py").write_text("raise SystemExit(0)")
-        with self.assertRaises(AepmError):
+        (self.app / ".clod/packages" / ref["digest"] / "test.py").write_text("raise SystemExit(0)")
+        with self.assertRaises(ClodError):
             verify_application(self.app, self.policy, True)
 
     def test_a_written_next_design_keeps_the_installed_update_policy(self):
-        installed = load(self.app / ".aepm/definition.json")["updatePolicy"]
+        installed = load(self.app / ".clod/definition.json")["updatePolicy"]
         self.definition["components"][0]["version"] = "0.1.1"
         self.definition["updatePolicy"] = {"security": "hold", "features": "hold", "preview": "auto"}
         value = update.propose(self.app, self.definition, self.store, self.policy, True)
         self.assertEqual(value["updatePolicy"], installed)
-        self.assertEqual(load(Path(value["stage"]) / ".aepm/definition.json")["updatePolicy"], installed)
+        self.assertEqual(load(Path(value["stage"]) / ".clod/definition.json")["updatePolicy"], installed)
         chosen = {"security": "manual", "features": "manual", "preview": "hold"}
         value = update.propose(self.app, self.definition, self.store, self.policy, True, update_policy=chosen)
         self.assertEqual((value["updatePolicy"], value["skipped"]), (chosen, []))
@@ -231,44 +231,44 @@ class ApplicationTests(unittest.TestCase):
     def test_update_preserves_unmanaged_and_keeps_backup(self):
         self.app.chmod(DIRECTORY_MODE)
         (self.app / "notes.txt").write_text("keep me")
-        (self.app / ".aepm/custom-empty").mkdir()
+        (self.app / ".clod/custom-empty").mkdir()
         proposal, value = self.proposal()
         approval = self.approval(proposal)
         assembly = update.apply(self.app, proposal, approval, self.policy)
         self.assertIn("0.1.1", (self.app / "components/sample/value.txt").read_text())
         self.assertEqual((self.app / "notes.txt").read_text(), "keep me")
-        self.assertTrue((self.app / ".aepm/custom-empty").is_dir())
+        self.assertTrue((self.app / ".clod/custom-empty").is_dir())
         self.assertEqual(self.app.stat().st_mode & 0o7777, DIRECTORY_MODE)
         self.assertTrue((Path(value["stage"]).parent / "backup/notes.txt").exists())
         self.assertEqual(update.recover(self.app), assembly)
 
     def test_owned_edits_prevent_proposal(self):
         (self.app / "app.txt").write_text("local edit")
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             self.proposal()
 
     def test_forged_assembly_file_hash_is_rejected(self):
         (self.app / "app.txt").write_text("local edit")
-        assembly = load(self.app / ".aepm/assembly.json")
+        assembly = load(self.app / ".clod/assembly.json")
         next(item for item in assembly["files"] if item["path"] == "app.txt")["digest"] = digest(b"local edit")
-        write(self.app / ".aepm/assembly.json", assembly)
-        with self.assertRaises(AepmError):
+        write(self.app / ".clod/assembly.json", assembly)
+        with self.assertRaises(ClodError):
             self.proposal()
 
     def test_failed_application_verification_blocks_proposal(self):
         self.publish_recipe(lambda manifest: manifest["verification"][-1].update(argv=[PYTHON, "-c", "raise SystemExit(9)"]))
         before = snapshot(self.app)
-        with self.assertRaisesRegex(AepmError, "report-verdict"):
+        with self.assertRaisesRegex(ClodError, "report-verdict"):
             self.proposal()
         self.assertEqual(snapshot(self.app), before)
 
     def test_new_owned_file_and_unmanaged_ancestor_collisions(self):
         self.publish_recipe(lambda manifest: manifest["artefacts"].append({"source": "source.txt", "destination": "custom/new.txt", "template": True, "executable": False}))
         (self.app / "custom").mkdir()
-        with self.assertRaisesRegex(AepmError, "unmanaged-collision"):
+        with self.assertRaisesRegex(ClodError, "unmanaged-collision"):
             self.proposal()
         (self.app / "custom/new.txt").write_text("my file")
-        with self.assertRaisesRegex(AepmError, "unmanaged-collision"):
+        with self.assertRaisesRegex(ClodError, "unmanaged-collision"):
             self.proposal()
 
     def test_scrubbed_environment_rooted_preparation_network_and_output_limit(self):
@@ -313,19 +313,19 @@ class ApplicationTests(unittest.TestCase):
                 else:
                     app.chmod(DIRECTORY_MODE)
                 before = snapshot(app)
-                with self.assertRaises(AepmError):
+                with self.assertRaises(ClodError):
                     update.apply(app, proposal, approval, self.policy)
                 self.assertEqual(snapshot(app), before)
 
     def test_missing_wrong_role_stale_owner_and_staged_edit(self):
         proposal, value = self.proposal()
-        with self.assertRaises((AepmError, OSError)):
+        with self.assertRaises((ClodError, OSError)):
             update.apply(self.app, proposal, self.root / "missing", self.policy)
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             update.approve(proposal, self.identities / "guardian.pem", self.policy)
         approval = self.approval(proposal)
         (Path(value["stage"]) / "extra.txt").write_text("unapproved")
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             update.apply(self.app, proposal, approval, self.policy)
 
     def test_interrupt_both_renames_before_and_after(self):
@@ -351,7 +351,7 @@ class ApplicationTests(unittest.TestCase):
                         if calls == boundary and after:
                             raise InterruptedError()
 
-                    with patch.object(update, "rename", interrupted), self.assertRaises(AepmError):
+                    with patch.object(update, "rename", interrupted), self.assertRaises(ClodError):
                         update.apply(self.app, proposal, approval, self.policy)
                     update.recover(self.app)
                     self.assertEqual(snapshot(self.app), before)
@@ -371,7 +371,7 @@ class ApplicationTests(unittest.TestCase):
                         raise InterruptedError()
                     actual_journal(directory, value, current)
 
-                with patch.object(update, "journal", interrupted), self.assertRaises(AepmError):
+                with patch.object(update, "journal", interrupted), self.assertRaises(ClodError):
                     update.apply(self.app, proposal, approval, self.policy)
                 if phase != "prepared":
                     update.recover(self.app)
@@ -387,27 +387,27 @@ class ApplicationTests(unittest.TestCase):
             if phase == "old-moved":
                 raise InterruptedError()
 
-        with patch.object(update, "journal", interrupted), self.assertRaises(AepmError):
+        with patch.object(update, "journal", interrupted), self.assertRaises(ClodError):
             update.apply(self.app, proposal, approval, self.policy)
         self.assertFalse(self.app.exists())
         stage = Path(value["stage"])
         (stage / "unapproved").write_text("new content")
-        with self.assertRaisesRegex(AepmError, "recovery-stage-changed"):
+        with self.assertRaisesRegex(ClodError, "recovery-stage-changed"):
             update.recover(self.app)
         self.assertTrue((stage / "unapproved").exists())
         self.assertTrue((stage.parent / "backup").exists())
         self.assertFalse(self.app.exists())
         (stage / "unapproved").unlink()
         (stage.parent / "backup/notes").write_text("unapproved old content")
-        with self.assertRaisesRegex(AepmError, "recovery-backup-changed"):
+        with self.assertRaisesRegex(ClodError, "recovery-backup-changed"):
             update.recover(self.app)
         self.assertEqual((stage.parent / "backup/notes").read_text(), "unapproved old content")
 
-    def requiring_recipe(self, optional=None, port_required=True, connect=None, provided="ae/contract"):
+    def requiring_recipe(self, optional=None, port_required=True, connect=None, provided="com.clodhub/contract"):
         """Publish a recipe requiring `rules`; `optional` None omits the manifest field."""
         for stale in ("store", "recipe", "installed"):
             shutil.rmtree(self.root / stale, ignore_errors=True)
-        entry = {"id": "rules", "type": "ae/contract", "version": "1.0.0", "path": "interface.txt"}
+        entry = {"id": "rules", "type": "com.clodhub/contract", "version": "1.0.0", "path": "interface.txt"}
         if optional is not None:
             entry["optional"] = optional
 
@@ -415,7 +415,7 @@ class ApplicationTests(unittest.TestCase):
             manifest["requires"] = [entry]
             visual = load(self.root / "recipe/visual.json")
             visual["ports"] = [{"id": "rules", "name": "Rules", "direction": "input", "kind": "interface",
-                                "type": "ae/contract", "version": "1.0.0", "required": port_required, "cardinality": "one"}]
+                                "type": "com.clodhub/contract", "version": "1.0.0", "required": port_required, "cardinality": "one"}]
             write(self.root / "recipe/visual.json", visual)
 
         self.publish_recipe(mutate)
@@ -450,7 +450,7 @@ class ApplicationTests(unittest.TestCase):
         for optional in (None, False):
             with self.subTest(optional=optional):
                 self.requiring_recipe(optional=optional)
-                with self.assertRaisesRegex(AepmError, "diagram"):
+                with self.assertRaisesRegex(ClodError, "diagram"):
                     self.install()
                 self.assertFalse((self.root / "installed").exists())
 
@@ -460,16 +460,16 @@ class ApplicationTests(unittest.TestCase):
         self.assertEqual(len(assembly["design"]["connections"]), 1)
         retained_manifests(self.root / "installed", self.policy)
         shutil.rmtree(self.root / "installed")
-        self.definition["design"]["definitions"][0]["ports"][0]["type"] = "ae/other"
-        with self.assertRaisesRegex(AepmError, "diagram"):
+        self.definition["design"]["definitions"][0]["ports"][0]["type"] = "com.clodhub/other"
+        with self.assertRaisesRegex(ClodError, "diagram"):
             self.install()
-        self.definition["design"]["definitions"][0]["ports"][0].update(type="ae/contract", version="2.0.0")
-        with self.assertRaisesRegex(AepmError, "diagram"):
+        self.definition["design"]["definitions"][0]["ports"][0].update(type="com.clodhub/contract", version="2.0.0")
+        with self.assertRaisesRegex(ClodError, "diagram"):
             self.install()
 
     def test_optional_requirement_needs_package_visual_port_not_required(self):
         self.requiring_recipe(optional=True, port_required=True)
-        with self.assertRaisesRegex(AepmError, "diagram-interface"):
+        with self.assertRaisesRegex(ClodError, "diagram-interface"):
             self.install()
 
     def test_non_optional_requirement_takes_requiredness_from_visual_port(self):
@@ -546,7 +546,7 @@ class ApplicationTests(unittest.TestCase):
         for entries, code in (([("notes", None), ("notes/extra.txt", sample)], "artefact-collision"),):
             with self.subTest(entries=entries):
                 self.conditional_recipe(entries)
-                with self.assertRaisesRegex(AepmError, code):
+                with self.assertRaisesRegex(ClodError, code):
                     self.install()
                 self.assertFalse((self.root / "installed").exists())
                 self.conditional_recipe(entries, components=False)
@@ -560,7 +560,7 @@ class ApplicationTests(unittest.TestCase):
         self.assertEqual(self.owned(installed), ["app.txt", "components/deck/value.txt"])
         self.assertEqual((self.root / "installed/components/deck/value.txt").read_text(), "count=7\nversion=0.1.0\n")
         self.assertFalse((self.root / "installed/components/sample").exists())
-        self.assertEqual([item["id"] for item in installed["design"]["instances"]][-1], "deck")
+        self.assertEqual(sorted(item["id"] for item in installed["design"]["instances"]), ["application", "deck"])
         self.assertEqual(read_assembly(self.root / "installed"), installed)
         retained_manifests(self.root / "installed", self.policy)
         verify_application(self.root / "installed", self.policy, True)
@@ -598,11 +598,11 @@ class ApplicationTests(unittest.TestCase):
         lock = resolve(requirements(self.definition), self.store / "catalogue.json", self.definition["id"], changed)
         self.assertEqual(lock["definitionDigest"], changed)
         installed = assemble(self.definition, lock, self.store, self.root / "installed", self.policy)
-        self.assertEqual(load(self.root / "installed/.aepm/definition.json"), self.definition)
+        self.assertEqual(load(self.root / "installed/.clod/definition.json"), self.definition)
         self.assertEqual(installed["lock"]["definitionDigest"], changed)
         self.assertEqual(read_assembly(self.root / "installed"), installed)
         retained_manifests(self.root / "installed", self.policy)
-        with self.assertRaisesRegex(AepmError, "lock-definition"):
+        with self.assertRaisesRegex(ClodError, "lock-definition"):
             assemble(self.definition, type(self).lock, self.store, self.root / "other", self.policy)
         self.definition["answers"] = {}
         self.assertNotEqual(digest(canonical(self.definition)), plain_digest)
@@ -613,11 +613,11 @@ class ApplicationTests(unittest.TestCase):
                 with self.subTest(key=key, value=str(value)[:20]):
                     definition = deepcopy(self.definition)
                     definition[key] = value
-                    with self.assertRaises(AepmError):
+                    with self.assertRaises(ClodError):
                         validate_definition(definition)
         definition = deepcopy(self.definition)
         definition["extra"] = {}
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             validate_definition(definition)
 
     def test_all_frozen_commands(self):

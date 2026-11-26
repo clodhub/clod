@@ -30,7 +30,7 @@ HELPER = r'''
 import ctypes as c
 import json, os, subprocess, sys, time
 from pathlib import Path
-from aepm.private_process import CombinedInfo
+from clod.private_process import CombinedInfo
 from tests.run_cleanup_exit_capability import WaitObservation
 root = Path(sys.argv[1])
 deadline = time.monotonic() + 20
@@ -118,7 +118,7 @@ def read_when_ready(path, deadline):
 
 class WaitObservation:
     def __init__(self):
-        from aepm.posix_process import DarwinSignalAction, DarwinSignalInfo
+        from clod.posix_process import DarwinSignalAction, DarwinSignalInfo
 
         require(c.sizeof(DarwinSignalInfo) == 104, "wait record layout")
         self.record = DarwinSignalInfo
@@ -161,7 +161,7 @@ def observe(child, deadline, observer):
 
 class Queries:
     def __init__(self):
-        from aepm.private_process import CombinedInfo, UniqueInfo
+        from clod.private_process import CombinedInfo, UniqueInfo
 
         require(sys.platform == "darwin", "Darwin required")
         require(c.sizeof(CombinedInfo) == 192 and c.sizeof(UniqueInfo) == 56, "record layout")
@@ -296,7 +296,7 @@ def run_case(root, separate, queries, observer, overall):
 
 
 def hashes():
-    source = Path(__file__).resolve().parents[1] / "aepm"
+    source = Path(__file__).resolve().parents[1] / "clod"
     return {name: hashlib.sha256((source / name).read_bytes()).hexdigest()
             for name in ("process.py", "posix_process.py", "private_process.py")}
 

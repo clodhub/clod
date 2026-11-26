@@ -11,47 +11,47 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from aepm.application import assemble, requirements
-from aepm.bom import bill_of_materials
-from aepm.bundle import pack, read_archive, read_package, resolve, source_tree_digest
-from aepm.foundations import (class_descriptor, maintenance_facts, module_sources, selected_targets,
+from clod.application import assemble, requirements
+from clod.bom import bill_of_materials
+from clod.bundle import pack, read_archive, read_package, resolve, source_tree_digest
+from clod.foundations import (class_descriptor, maintenance_facts, module_sources, selected_targets,
                              source_for_module, validate_graph, validate_package_foundations)
-from aepm.io import load, write
-from aepm.model import AepmError, canonical, digest, validate_component
-from aepm.recipe import Package, fit
-from aepm.test_identities import generate
-from aepm.trust import publish_release, publish_review, review_bindings, verify_package
-from aepm.verification import review_package
+from clod.io import load, write
+from clod.model import ClodError, canonical, digest, validate_component
+from clod.recipe import Package, fit
+from clod.test_identities import generate
+from clod.trust import publish_release, publish_review, review_bindings, verify_package
+from clod.verification import review_package
 from tests.core.test_core import CLASS_FIELDS, PYTHON, fixture, without_execution
 
 
 CHECK = b"""import importlib.util, json, os
 from pathlib import Path
-root = Path(os.environ['AEPM_CANDIDATE_ROOT'])
-manifest = json.loads(Path(os.environ['AEPM_CANDIDATE_MANIFEST']).read_text())
-destination = 'components/' + manifest['identity']['name'].split('/')[1] + '/counter.py'
-path = Path(json.loads(os.environ['AEPM_MODULE_MAP'])[destination])
+root = Path(os.environ['CLOD_CANDIDATE_ROOT'])
+manifest = json.loads(Path(os.environ['CLOD_CANDIDATE_MANIFEST']).read_text())
+destination = 'components/' + manifest['identity']['name'].rsplit('/', 1)[1] + '/counter.py'
+path = Path(json.loads(os.environ['CLOD_MODULE_MAP'])[destination])
 assert path.is_relative_to(root)
 assert not os.environ.get('AWS_SECRET_ACCESS_KEY')
 spec = importlib.util.spec_from_file_location('candidate', path)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 assert module.increment(4) == 5
-assert len(os.environ['AEPM_CANDIDATE_DIGEST']) == 64
+assert len(os.environ['CLOD_CANDIDATE_DIGEST']) == 64
 """
 
 
 def counter(root, name="counter", implementation=b"def increment(value):\n    return value + 1\n"):
     manifest = fixture(root, name)
-    data = {"classes/counter/interface.json": b'{"type":"counter"}', "classes/counter/check.py": CHECK,
+    data = {"classes/counter/interface.json": b'{"type":"com.clodhub/counter"}', "classes/counter/check.py": CHECK,
             "source/counter.py": implementation}
     for path, raw in data.items():
         destination = root / path
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(raw)
         manifest["files"].append({"path": path, "executable": False})
-    descriptor = {**CLASS_FIELDS, "name": "clodhub/counter-class", "version": "1.0.0",
-                  "provides": [{"type": "counter", "version": "1.0.0", "path": "classes/counter/interface.json",
+    descriptor = {**CLASS_FIELDS, "name": "pkg:clod/com.clodhub/counter-class", "version": "1.0.0",
+                  "provides": [{"type": "com.clodhub/counter", "version": "1.0.0", "path": "classes/counter/interface.json",
                                 "modules": {"web": ["counter.py"], "ios": ["counter.py"]}}],
                   "requires": [], "settings": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
                   "inventory": [{"path": path, "digest": digest(raw)} for path, raw in data.items() if path.startswith("classes/")],
@@ -59,7 +59,7 @@ def counter(root, name="counter", implementation=b"def increment(value):\n    re
                                     "fixtures": ["classes/counter/check.py"]}]}
     reference = {"name": descriptor["name"], "version": descriptor["version"], "digest": digest(canonical(descriptor))}
     manifest.update(platforms=["web", "ios"], toolchains={"web": [], "ios": []}, classes=[{"reference": reference, "descriptor": descriptor}], implements=[reference],
-                    provides=[{"id": "counter", "type": "counter", "version": "1.0.0", "path": "interface.txt"}],
+                    provides=[{"id": "counter", "type": "com.clodhub/counter", "version": "1.0.0", "path": "interface.txt"}],
                     artefacts=[{"source": "source/counter.py", "destination": f"components/{name}/counter.py", "template": False, "executable": False}])
     write(root / "component.json", manifest)
     return manifest
@@ -96,27 +96,27 @@ class FoundationTests(unittest.TestCase):
         for key in ("classes", "implements", "platforms", "toolchains", "upstream", "compatibility", "maintenance"):
             changed = deepcopy(self.manifest)
             del changed[key]
-            with self.subTest(key=key), self.assertRaisesRegex(AepmError, "invalid-fields"):
+            with self.subTest(key=key), self.assertRaisesRegex(ClodError, "invalid-fields"):
                 validate_component(changed)
         for change in (lambda m: m.update(implements=[]), lambda m: m.update(platforms=["apple"]),
                        lambda m: m["maintenance"].update(lastSuccessfulVerification="2026-01-01"),
                        lambda m: m["classes"][0]["descriptor"].update(extra=True)):
             changed = deepcopy(self.manifest)
             change(changed)
-            with self.assertRaises(AepmError):
+            with self.assertRaises(ClodError):
                 validate_component(changed)
 
     def test_descriptor_and_interface_and_test_tampering_rejected(self):
-        self.manifest["classes"][0]["descriptor"]["requires"] = [{"type": "other", "version": "1.0.0"}]
+        self.manifest["classes"][0]["descriptor"]["requires"] = [{"type": "com.clodhub/other", "version": "1.0.0"}]
         self.save()
-        with self.assertRaisesRegex(AepmError, "class-digest"):
+        with self.assertRaisesRegex(ClodError, "class-digest"):
             pack(self.source, self.store)
         self.manifest = counter(self.root / "intact")
         self.source = self.root / "intact"
         for path in ("classes/counter/check.py", "classes/counter/interface.json"):
             original = (self.source / path).read_bytes()
             (self.source / path).write_bytes(b"assert True\n")
-            with self.subTest(path=path), self.assertRaisesRegex(AepmError, "class-file-digest"):
+            with self.subTest(path=path), self.assertRaisesRegex(ClodError, "class-file-digest"):
                 pack(self.source, self.store)
             (self.source / path).write_bytes(original)
         self.assertFalse(self.store.exists())
@@ -136,7 +136,7 @@ class FoundationTests(unittest.TestCase):
                 info.mode = 0o755 if path in executable else 0o644
                 archive.addfile(info, io.BytesIO(payloads[path]))
         raw = output.getvalue()
-        with self.assertRaisesRegex(AepmError, "class-file-digest"):
+        with self.assertRaisesRegex(ClodError, "class-file-digest"):
             read_archive({**ref, "digest": digest(raw)}, raw)
 
     def test_candidate_documents_are_independent(self):
@@ -171,7 +171,7 @@ class FoundationTests(unittest.TestCase):
             path = root / "classes/counter/check.py"
             original = path.read_bytes()
             path.write_bytes(b"assert True\n")
-            self.assertEqual(fit(self.ref(), candidate, authority, ["web"]), ["class-file-digest:clodhub/counter-class"])
+            self.assertEqual(fit(self.ref(), candidate, authority, ["web"]), ["class-file-digest:pkg:clod/com.clodhub/counter-class"])
             self.assertGreater(len(reads[reader]), len(expected))
             path.write_bytes(original)
 
@@ -182,7 +182,7 @@ class FoundationTests(unittest.TestCase):
         descriptor = other["classes"][0]["descriptor"]
         descriptor["inventory"][1]["digest"] = digest(b"assert True\n")
         other["classes"][0]["reference"]["digest"] = digest(canonical(descriptor))
-        self.assertEqual(fit(self.ref(), self.package(other, other_root), self.package(), ["web"]), ["class-unavailable:clodhub/counter-class"])
+        self.assertEqual(fit(self.ref(), self.package(other, other_root), self.package(), ["web"]), ["class-unavailable:pkg:clod/com.clodhub/counter-class"])
 
     def test_actual_candidate_failure_defeats_own_passing_tests(self):
         (self.source / "source/counter.py").write_bytes(b"def increment(value):\n    return value + 9\n")
@@ -196,7 +196,7 @@ class FoundationTests(unittest.TestCase):
         inventory = self.manifest["classes"][0]["descriptor"]["inventory"]
         self.assertEqual(shared["classEvidence"]["inventoryDigest"], digest(canonical(inventory)))
         self.assertIn({"path": "classes/counter/check.py", "digest": digest(CHECK)}, inventory)
-        with self.assertRaisesRegex(AepmError, "report-verdict"):
+        with self.assertRaisesRegex(ClodError, "report-verdict"):
             publish_review(self.store, ref, report, self.root / "keys/guardian.pem", policy=policy)
 
     def test_signed_class_results_and_maintenance_facts(self):
@@ -229,7 +229,7 @@ class FoundationTests(unittest.TestCase):
                 ("suite-coverage", lambda value: value.update(suites=[item for item in value["suites"] if "classEvidence" not in item]))):
             changed = deepcopy(report)
             change(changed)
-            with self.subTest(code=code), self.assertRaisesRegex(AepmError, code):
+            with self.subTest(code=code), self.assertRaisesRegex(ClodError, code):
                 publish_review(self.store, ref, changed, self.root / "keys/guardian.pem", policy=policy)
 
     def test_report_size_is_independent_of_class_inventory_size(self):
@@ -247,7 +247,7 @@ class FoundationTests(unittest.TestCase):
         descriptor["verification"] = [{**deepcopy(template), "id": f"increment-{index}"} for index in range(6)]
         entry["reference"]["digest"] = digest(canonical(descriptor))
         self.manifest["implements"] = [entry["reference"]]
-        self.manifest["format"] = 3
+        self.manifest["format"] = 4
         for suite in self.manifest["verification"]:
             suite["execution"] = {"kind": "local", "simulation": False, "operations": [], "settings": [],
                                   "secrets": [], "resources": [], "assertions": [], "cleanup": None}
@@ -257,7 +257,7 @@ class FoundationTests(unittest.TestCase):
         self.assertGreater(inventory_bytes, 5 * 1024 * 1024)
         policy = self.sign_for_review([ref])
         report = review_package(ref, self.store, policy, True)
-        self.assertEqual((report["format"], report["summary"]["required-local"]), (2, "passed"), report)
+        self.assertEqual((report["format"], report["summary"]["required-local"]), (4, "passed"), report)
         records = [item["classEvidence"] for item in report["suites"] if "classEvidence" in item]
         self.assertEqual(len(records), 6)
         self.assertTrue(all(len(canonical(record)) < 400 for record in records))
@@ -269,13 +269,13 @@ class FoundationTests(unittest.TestCase):
         self.reject_class_evidence_changes(ref, report, policy)
 
     def test_class_suite_records_only_bytes_matching_its_inventory(self):
-        from aepm.foundations import class_result_evidence, class_suites
+        from clod.foundations import class_result_evidence, class_suites
         suite = class_suites(self.manifest)[0]
         record = class_result_evidence(suite, self.source, 10, 11)
         self.assertEqual(record, {"reference": suite["class"], "inventoryDigest": digest(canonical(suite["classInventory"])),
                                   "startedAt": 10, "completedAt": 11})
         (self.source / "classes/counter/check.py").write_bytes(b"assert True\n")
-        with self.assertRaisesRegex(AepmError, "class-file-digest"):
+        with self.assertRaisesRegex(ClodError, "class-file-digest"):
             class_result_evidence(suite, self.source, 10, 11)
 
     def test_class_identity_conflict_across_graph(self):
@@ -283,16 +283,16 @@ class FoundationTests(unittest.TestCase):
         other["classes"][0]["descriptor"]["settings"]["required"] = []
         other["classes"][0]["descriptor"]["verification"][0]["timeoutSeconds"] = 20
         other["classes"][0]["reference"]["digest"] = digest(canonical(other["classes"][0]["descriptor"]))
-        with self.assertRaisesRegex(AepmError, "class-identity-conflict"):
+        with self.assertRaisesRegex(ClodError, "class-identity-conflict"):
             validate_graph([self.manifest, other])
 
     def test_exact_reference_and_missing_inventory_rejected(self):
         payloads = {item["path"]: (self.source / item["path"]).read_bytes() for item in self.manifest["files"]}
         for reference in ({**self.ref(), "version": "1.0.1"}, {**self.ref(), "digest": "f" * 64}):
-            with self.assertRaisesRegex(AepmError, "class-unavailable"):
+            with self.assertRaisesRegex(ClodError, "class-unavailable"):
                 class_descriptor(self.manifest, payloads, reference)
         del payloads["classes/counter/check.py"]
-        with self.assertRaisesRegex(AepmError, "class-file-digest"):
+        with self.assertRaisesRegex(ClodError, "class-file-digest"):
             validate_package_foundations(self.manifest, payloads)
 
     def test_web_only_candidate_fails_native_fit(self):
@@ -317,12 +317,12 @@ class FoundationTests(unittest.TestCase):
 
     def test_selected_targets_are_checked(self):
         self.assertEqual(selected_targets(self.manifest, {"targets": ["web"]}), ["web"])
-        with self.assertRaisesRegex(AepmError, "unsupported-platform"):
+        with self.assertRaisesRegex(ClodError, "unsupported-platform"):
             selected_targets(self.manifest, {"targets": ["android"]})
         other = deepcopy(self.manifest)
         other["platforms"] = ["web"]
         other["toolchains"] = {"web": []}
-        with self.assertRaisesRegex(AepmError, "unsupported-platform"):
+        with self.assertRaisesRegex(ClodError, "unsupported-platform"):
             validate_graph([other], ["ios"])
 
     def test_runtime_and_framework_intersections(self):
@@ -334,26 +334,26 @@ class FoundationTests(unittest.TestCase):
             other["compatibility"][kind] = {"client": entry(">=19.0.0 <=20.0.0")}
             validate_graph([self.manifest, other])
             other["compatibility"][kind] = {"client": entry(">=20.0.0 <21.0.0")}
-            with self.assertRaisesRegex(AepmError, "compatibility-range-conflict"):
+            with self.assertRaisesRegex(ClodError, "compatibility-range-conflict"):
                 validate_graph([self.manifest, other])
             self.manifest["compatibility"][kind] = {}
             other["compatibility"][kind] = {}
         self.manifest["compatibility"]["frameworks"] = {"web-ui": {"name": "vue", "range": ">=3.0.0 <4.0.0"}}
         other["compatibility"]["frameworks"] = {"web-ui": {"name": "react", "range": ">=19.0.0 <20.0.0"}}
-        with self.assertRaisesRegex(AepmError, "framework-conflict"):
+        with self.assertRaisesRegex(ClodError, "framework-conflict"):
             validate_graph([self.manifest, other])
 
     def test_unknown_range_forms_rejected(self):
         for expression in ("^1.0.0", "~1.0.0", "1.x", "1.0.0", ">=1.0.0 || <2.0.0", ">=1.0.0-beta", ">=2.0.0 <2.0.0"):
             self.manifest["compatibility"]["runtimes"] = {"node": expression}
-            with self.subTest(expression=expression), self.assertRaises(AepmError):
+            with self.subTest(expression=expression), self.assertRaises(ClodError):
                 validate_component(self.manifest)
 
     def test_shared_conflict_and_isolated_versions(self):
         other = deepcopy(self.manifest)
         self.manifest["compatibility"]["dependencies"] = [{"name": "pkg:npm/example", "version": "1.0.0", "isolation": "shared"}]
         other["compatibility"]["dependencies"] = [{"name": "pkg:npm/example", "version": "2.0.0", "isolation": "shared"}]
-        with self.assertRaisesRegex(AepmError, "shared-dependency-conflict"):
+        with self.assertRaisesRegex(ClodError, "shared-dependency-conflict"):
             validate_graph([self.manifest, other])
         other["compatibility"]["dependencies"][0]["isolation"] = "isolated"
         validate_graph([self.manifest, other])
@@ -365,12 +365,12 @@ class FoundationTests(unittest.TestCase):
         styles = {"scope": "global", "namespaces": ["button"], "conflicts": []}
         self.manifest["compatibility"]["styles"] = deepcopy(styles)
         other["compatibility"]["styles"] = deepcopy(styles)
-        with self.assertRaisesRegex(AepmError, "stylesheet-conflict"):
+        with self.assertRaisesRegex(ClodError, "stylesheet-conflict"):
             validate_graph([self.manifest, other])
         other["compatibility"]["styles"].update(scope="scoped", namespaces=["counter"])
         validate_graph([self.manifest, other])
         self.manifest["compatibility"]["styles"]["conflicts"] = ["counter"]
-        with self.assertRaisesRegex(AepmError, "stylesheet-conflict"):
+        with self.assertRaisesRegex(ClodError, "stylesheet-conflict"):
             validate_graph([self.manifest, other])
 
     def upstream(self, delivery):
@@ -391,7 +391,7 @@ class FoundationTests(unittest.TestCase):
         imported = next(item for item in document["components"] if item.get("purl") == upstream["purl"])
         self.assertEqual((imported["licenses"], imported["version"]), ([{"expression": upstream["licence"]}], "4.2.0"))
         (self.source / "source/counter.py").write_bytes(b"changed")
-        with self.assertRaisesRegex(AepmError, "upstream-file-digest"):
+        with self.assertRaisesRegex(ClodError, "upstream-file-digest"):
             pack(self.source, self.root / "other-store")
 
     def test_build_lock_integrity_and_version_tampering(self):
@@ -405,22 +405,22 @@ class FoundationTests(unittest.TestCase):
         ref = pack(self.source, self.store)
         self.assertEqual(read_package(ref, self.store)[1]["package-lock.json"], raw)
         (self.source / "package-lock.json").write_bytes(raw + b" ")
-        with self.assertRaisesRegex(AepmError, "upstream-lock-digest"):
+        with self.assertRaisesRegex(ClodError, "upstream-lock-digest"):
             pack(self.source, self.root / "other-store")
         lock["packages"]["node_modules/example"]["version"] = "4.2.1"
         raw = canonical(lock)
         (self.source / "package-lock.json").write_bytes(raw)
         self.manifest["upstream"][0]["delivery"]["digest"] = digest(raw)
         self.save()
-        with self.assertRaisesRegex(AepmError, "upstream-lock-pin"):
+        with self.assertRaisesRegex(ClodError, "upstream-lock-pin"):
             pack(self.source, self.root / "other-store")
 
     def test_missing_notices_and_upstream_inventory_rejected(self):
         self.manifest["upstream"] = [self.upstream({"kind": "bundled", "files": [{"path": "absent", "digest": "0" * 64}]})]
-        with self.assertRaisesRegex(AepmError, "upstream-source-missing"):
+        with self.assertRaisesRegex(ClodError, "upstream-source-missing"):
             validate_component(self.manifest)
         self.manifest["upstream"][0]["notices"] = ["absent-NOTICE"]
-        with self.assertRaisesRegex(AepmError, "upstream-notice-missing"):
+        with self.assertRaisesRegex(ClodError, "upstream-notice-missing"):
             validate_component(self.manifest)
 
     def test_native_build_time_delivery_cannot_declare_npm_manager(self):
@@ -436,7 +436,7 @@ class FoundationTests(unittest.TestCase):
                 upstream = self.upstream({"kind": "build-time", "manager": "npm", "lock": path, "digest": digest(raw), "packagePath": "node_modules/example", "integrity": integrity})
                 upstream["purl"] = purl
                 self.manifest["upstream"] = [upstream]
-                with self.assertRaisesRegex(AepmError, "unsupported-upstream-delivery"):
+                with self.assertRaisesRegex(ClodError, "unsupported-upstream-delivery"):
                     validate_component(self.manifest)
                 self.manifest["files"] = [item for item in self.manifest["files"] if item["path"] not in (path, "vendor-NOTICE")]
 
@@ -449,7 +449,7 @@ class FoundationTests(unittest.TestCase):
         upstream["purl"] = "pkg:maven/org.example/example@4.2.0"
         self.manifest["upstream"] = [upstream]
         self.save()
-        with self.assertRaisesRegex(AepmError, "unsupported-upstream-delivery"):
+        with self.assertRaisesRegex(ClodError, "unsupported-upstream-delivery"):
             pack(self.source, self.store)
         self.assertFalse(self.store.exists())
 
@@ -459,19 +459,20 @@ class FoundationTests(unittest.TestCase):
         self.manifest["compatibility"]["runtimes"] = {"node": ">=20.0.0 <21.0.0"}
         other["compatibility"]["runtimes"] = {"node": ">=22.0.0 <23.0.0"}
         other["kind"] = "recipe"
+        other["identity"]["name"] = "pkg:clod/com.clodhub/other-recipe"
         other["artefacts"][0]["destination"] = "counter.py"
         self.save()
         write(other_root / "component.json", other)
         pack(self.source, self.store)
         pack(other_root, self.store)
-        definition = {"format": 2, "id": "counter-app", "title": "Counter", "recipe": {"name": "clodhub/other", "version": "0.1.0"},
-                      "components": [{"id": "counter", "name": "clodhub/counter", "version": "0.1.0", "configuration": {}}],
+        definition = {"format": 3, "id": "counter-app", "title": "Counter", "recipe": {"name": "pkg:clod/com.clodhub/other-recipe", "version": "0.1.0"},
+                      "components": [{"id": "counter", "name": "pkg:clod/com.clodhub/counter", "version": "0.1.0", "configuration": {}}],
                       "configuration": {}, "design": {"definitions": [], "instances": [], "connections": []}, "updatePolicy": {"security": "auto", "features": "manual", "preview": "hold"}}
         for operation in (lambda: resolve(requirements(definition), self.store / "catalogue.json", "counter-app", digest(canonical(definition))),
-                          lambda: assemble(definition, {"format": 1, "application": "counter-app", "definitionDigest": digest(canonical(definition)),
+                          lambda: assemble(definition, {"format": 2, "application": "counter-app", "definitionDigest": digest(canonical(definition)),
                                                         "packages": [{**entry, "dependencies": []} for entry in load(self.store / "catalogue.json")["entries"]]},
                                            self.store, self.root / "application", self.root / "absent-policy")):
-            with self.assertRaisesRegex(AepmError, "compatibility-range-conflict"):
+            with self.assertRaisesRegex(ClodError, "compatibility-range-conflict"):
                 operation()
         self.assertFalse((self.root / "application").exists())
 
@@ -483,7 +484,7 @@ class FoundationTests(unittest.TestCase):
         examples = [json.loads(raw) for raw in re.findall(r"```json\n(.*?)\n```", document, re.S)]
         self.assertEqual(examples[0], {key: manifest[key] for key in examples[0]})
         self.assertEqual(digest(canonical(examples[1])), manifest["implements"][0]["digest"])
-        self.assertEqual(manifest["implements"][0]["digest"], "a46f8d1353594c79f1c06c50b91c810fc38c0ac8919dc612d3c29d3fcf96cfe5")
+        self.assertEqual(manifest["implements"][0]["digest"], "1be56b8267bce466095dc55ae78b72c78446203b2e62bd71c8a657307498d816")
         self.assertEqual(fit(manifest["implements"][0], Package(manifest, payloads.__getitem__), Package(manifest, payloads.__getitem__), ["web"]), [])
         policy = self.sign_for_review([ref])
         report = review_package(ref, self.store, policy, True)

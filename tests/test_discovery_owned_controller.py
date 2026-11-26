@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-from aepm.private_process import DarwinBackend
+from clod.private_process import DarwinBackend
 from tests import run_discovery_owned_fixture as controller
 
 if os.name == "nt":
@@ -24,7 +24,7 @@ class ControllerFailureTests(unittest.TestCase):
         self.guards.enter_context(patch("subprocess.Popen", side_effect=AssertionError("child forbidden")))
         self.guards.enter_context(patch.object(os, "kill", side_effect=AssertionError("signal forbidden")))
         self.guards.enter_context(patch.object(os, "killpg", side_effect=AssertionError("group signal forbidden")))
-        self.guards.enter_context(patch("aepm.process.run", side_effect=AssertionError("runner forbidden")))
+        self.guards.enter_context(patch("clod.process.run", side_effect=AssertionError("runner forbidden")))
 
     def test_release_failure_still_joins_and_retains_original_cause(self):
         root = Mock()

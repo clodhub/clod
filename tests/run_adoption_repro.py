@@ -24,30 +24,30 @@ SELECTION_DIGEST = "45d081625b3add8f57d388d122da34114a05b123ff5c97018909c57121c6
 ADOPTION_ROOT = Path("/Applications/Xcode.app/Contents")
 ORDER = ("apple-catalyst", "apple-phone-tablet", "apple-test-build", "apple-tv")
 SOURCE = {
-    "aepm/__init__.py": "f4dfd4dfbbbebfd7a4457428fe9e4c618064b680ccda07e60a936c3894c4730d",
-    "aepm/__main__.py": "8cacb7b5e9ed795b5793edf3314cb86100606e728235f38429514344ff79b3f7",
-    "aepm/application.py": "b467a4021548a0d7bcd43408cb6dd38c3b329a399b5ba39d29349e6f102f3b4f",
-    "aepm/authorization.py": "bc29be5c15e92a882a01da71e980a0f149aa6a51a129eb33a7e55a812c7eda58",
-    "aepm/bundle.py": "10e57809228d0356dfcd8e254fedf4259cb176b6c3d5de7ae43544fffc1adc4a",
-    "aepm/contextual.py": "b0b05bc3dc12c2f59a36568fb76feeaabbc004bcc3b198136c38f3066529a4e5",
-    "aepm/crypto.mjs": "d888448b781f2794fe0c84f6b4f2ab8bba1958f87107984cabe6488dd90cc720",
-    "aepm/diagram/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "aepm/diagram/generate.py": "07b878a79c077c11aaed5f4e0f4eb3af2739fd2117c3d536b766e3501d0dfad2",
-    "aepm/environment.py": "9c0b699727824683ce2c179cdd93d18cb8ada695e0ac59d0b30796402e7e5356",
-    "aepm/export.py": "c4e07b6e4fd4f794594a28c5acdfde182423be30834fdb2bf30972ac43dbca5d",
-    "aepm/io.py": "361721a8b9bfdfa5c6cbb3b3830240981da365b573b6e53712ca9fc3ceeb418d",
-    "aepm/model.py": "4ec3f9e0174ab015c536effb093a75ff3ed11e772f4b10f93c40868a57c05b96",
-    "aepm/posix_process.py": "381428eaa15eb2bf0481fca960a25b632f6fc7332bb223c08d319b6a97c0bc4c",
-    "aepm/private_process.py": "a5316cba5372c18952ff194d9b4b5489107ec1eac02980b7bc42695873c98c94",
-    "aepm/process.py": "75d06b44c7b8035f4419d3db9265b22441abbf2dfa3a0339ce17bb0105f90b08",
-    "aepm/supervision.py": "08098de198f01d9785f42c9a944b176bfe2fc535be17a56522e7fef74a982b28",
-    "aepm/test_identities.py": "a0a1e696f689b0a3ff40c54a26b833eb6d57566daef1c98df6c6d8849b372c0a",
-    "aepm/tool_selection.py": "dbc2d0be8c773e958706218abdb18b3dcebfe6c9033fd787b4616e3ed7a55b44",
-    "aepm/trust.py": "c2b6a696dce81e8897a96a6bbdec4dca37f7035605fc8ea8a8f5e68df872df8d",
-    "aepm/update.py": "d11d94fe4592440200a86f1d6039c1bf145fd9ed8a92bc28e46fa915693b9d09",
-    "aepm/update_probe.mjs": "835bf9d5cb5c328e174bea4958a8ef6ef28d7c616384cc2e05b2facab31065bc",
-    "aepm/verification.py": "12f8bfd008a65a2a2a542f0415788cbba72a8f426b682d0dfa64da8ca94db3b5",
-    "aepm/windows.py": "f68e616f6c84f86a6ec853ed7910cf27f07fe26064b09292c5c65aa0bfddc33b",
+    "clod/__init__.py": "f4dfd4dfbbbebfd7a4457428fe9e4c618064b680ccda07e60a936c3894c4730d",
+    "clod/__main__.py": "8cacb7b5e9ed795b5793edf3314cb86100606e728235f38429514344ff79b3f7",
+    "clod/application.py": "b467a4021548a0d7bcd43408cb6dd38c3b329a399b5ba39d29349e6f102f3b4f",
+    "clod/authorization.py": "bc29be5c15e92a882a01da71e980a0f149aa6a51a129eb33a7e55a812c7eda58",
+    "clod/bundle.py": "10e57809228d0356dfcd8e254fedf4259cb176b6c3d5de7ae43544fffc1adc4a",
+    "clod/contextual.py": "b0b05bc3dc12c2f59a36568fb76feeaabbc004bcc3b198136c38f3066529a4e5",
+    "clod/crypto.mjs": "d888448b781f2794fe0c84f6b4f2ab8bba1958f87107984cabe6488dd90cc720",
+    "clod/diagram/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "clod/diagram/generate.py": "07b878a79c077c11aaed5f4e0f4eb3af2739fd2117c3d536b766e3501d0dfad2",
+    "clod/environment.py": "9c0b699727824683ce2c179cdd93d18cb8ada695e0ac59d0b30796402e7e5356",
+    "clod/export.py": "c4e07b6e4fd4f794594a28c5acdfde182423be30834fdb2bf30972ac43dbca5d",
+    "clod/io.py": "361721a8b9bfdfa5c6cbb3b3830240981da365b573b6e53712ca9fc3ceeb418d",
+    "clod/model.py": "4ec3f9e0174ab015c536effb093a75ff3ed11e772f4b10f93c40868a57c05b96",
+    "clod/posix_process.py": "381428eaa15eb2bf0481fca960a25b632f6fc7332bb223c08d319b6a97c0bc4c",
+    "clod/private_process.py": "a5316cba5372c18952ff194d9b4b5489107ec1eac02980b7bc42695873c98c94",
+    "clod/process.py": "75d06b44c7b8035f4419d3db9265b22441abbf2dfa3a0339ce17bb0105f90b08",
+    "clod/supervision.py": "08098de198f01d9785f42c9a944b176bfe2fc535be17a56522e7fef74a982b28",
+    "clod/test_identities.py": "a0a1e696f689b0a3ff40c54a26b833eb6d57566daef1c98df6c6d8849b372c0a",
+    "clod/tool_selection.py": "dbc2d0be8c773e958706218abdb18b3dcebfe6c9033fd787b4616e3ed7a55b44",
+    "clod/trust.py": "c2b6a696dce81e8897a96a6bbdec4dca37f7035605fc8ea8a8f5e68df872df8d",
+    "clod/update.py": "d11d94fe4592440200a86f1d6039c1bf145fd9ed8a92bc28e46fa915693b9d09",
+    "clod/update_probe.mjs": "835bf9d5cb5c328e174bea4958a8ef6ef28d7c616384cc2e05b2facab31065bc",
+    "clod/verification.py": "12f8bfd008a65a2a2a542f0415788cbba72a8f426b682d0dfa64da8ca94db3b5",
+    "clod/windows.py": "f68e616f6c84f86a6ec853ed7910cf27f07fe26064b09292c5c65aa0bfddc33b",
 }
 
 
@@ -112,13 +112,13 @@ def main(run, controller):
     bindings(source, controller)
     require(not out.exists() and not out.is_symlink() and out.parent.is_dir(), "occupied output")
     sys.path.insert(0, str(source))
-    from aepm import contextual, io
-    from aepm.environment import Execution
-    from aepm.io import load, snapshot
-    from aepm.model import canonical, digest
-    from aepm.private_process import adoption_root
-    from aepm.supervision import validate_log_index
-    from aepm.tool_selection import load_tool_selection
+    from clod import contextual, io
+    from clod.environment import Execution
+    from clod.io import load, snapshot
+    from clod.model import canonical, digest
+    from clod.private_process import adoption_root
+    from clod.supervision import validate_log_index
+    from clod.tool_selection import load_tool_selection
 
     require(digest(canonical(snapshot(APPLICATION))) == APPLICATION_SNAPSHOT, "retained application drift")
     anchor = adoption_root(ADOPTION_ROOT)
@@ -126,7 +126,7 @@ def main(run, controller):
     application = out / "application"
     shutil.copytree(APPLICATION, application, symlinks=True)
     require(digest(canonical(snapshot(application))) == APPLICATION_SNAPSHOT, "fresh application copy differs")
-    manifest = load(application / ".aepm/packages" / PACKAGE / "component.json")
+    manifest = load(application / ".clod/packages" / PACKAGE / "component.json")
     suites = {item["id"]: {**item, "package": PACKAGE} for item in manifest["verification"]}
     for name in ORDER:
         declaration = suites[name]["execution"]
@@ -153,7 +153,7 @@ def main(run, controller):
             self.preserve = True
             return super().__exit__(*args)
 
-    from aepm.private_process import DarwinBackend
+    from clod.private_process import DarwinBackend
     original_terminate = DarwinBackend.terminate
     summary["signalTargets"] = []
 

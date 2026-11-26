@@ -5,27 +5,27 @@ import os
 from pathlib import Path
 import tempfile
 
-from aepm.application import assemble, requirements
-from aepm.bundle import pack, read_package, resolve
-from aepm.io import load, private_directory, write
-from aepm.model import canonical, digest
-from aepm.test_identities import generate
-from aepm.trust import publish_release, publish_review, sign, verify_package
-from aepm.verification import review_package, verify_application
+from clod.application import assemble, requirements
+from clod.bundle import pack, read_package, resolve
+from clod.io import load, private_directory, write
+from clod.model import canonical, digest
+from clod.test_identities import generate
+from clod.trust import publish_release, publish_review, sign, verify_package
+from clod.verification import review_package, verify_application
 from tests.test_application import source
 
 
 CHECK = '''const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
-assert.equal(process.env.AEPM_WINDOWS_TEST_SECRET,undefined);
-const context=JSON.parse(fs.readFileSync(process.env.AEPM_CONTEXT_FILE,'utf8'));
+assert.equal(process.env.CLOD_WINDOWS_TEST_SECRET,undefined);
+const context=JSON.parse(fs.readFileSync(process.env.CLOD_CONTEXT_FILE,'utf8'));
 if(process.argv[2]==='package') assert.equal(fs.readFileSync('fixture.txt','utf8'),'fixture\\n');
 else assert.ok(fs.readFileSync('app.txt','utf8').startsWith('count=7'));
-const profile=path.join(path.dirname(process.env.AEPM_CONTEXT_FILE),'profiles','desktop');
+const profile=path.join(path.dirname(process.env.CLOD_CONTEXT_FILE),'profiles','desktop');
 fs.writeFileSync(path.join(profile,'marker'),'test-only');
 const result={artifacts:[],assertions:[{actual:true,id:'response-valid',passed:true}],
  cleanup:{attempted:false,completed:false,reason:'',required:true},format:1,id:context.id,package:context.package,resources:[],runId:context.runId};
-fs.writeFileSync(process.env.AEPM_RESULT_FILE,JSON.stringify(result));
-console.log(JSON.stringify({privateRoot:process.env.AEPM_PRIVATE_ROOT,profile}));
+fs.writeFileSync(process.env.CLOD_RESULT_FILE,JSON.stringify(result));
+console.log(JSON.stringify({privateRoot:process.env.CLOD_PRIVATE_ROOT,profile}));
 '''
 
 
@@ -36,12 +36,12 @@ def prepare(out):
     if out.exists():
         raise FileExistsError("Choose a fresh public fixture directory")
     private_directory(out)
-    with tempfile.TemporaryDirectory(prefix="aepm-windows-fixture-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="clod-windows-fixture-") as temporary:
         root = Path(temporary).resolve()
         policy_path = generate(root / "private-identities")
         package = root / "source"
         manifest = source(package, "windows-verification", recipe=True)
-        manifest["format"] = 3
+        manifest["format"] = 4
         (package / "check.cjs").write_text(CHECK)
         manifest["files"].append({"path": "check.cjs", "executable": False})
         manifest["artefacts"].append({"source": "check.cjs", "destination": "check.cjs", "template": False, "executable": False})
@@ -67,7 +67,7 @@ def prepare(out):
             raise AssertionError(report)
         publish_review(store, ref, report, root / "private-identities/guardian.pem", policy=out / "policy.json")
         verify_package(ref, store, out / "policy.json")
-        definition = {"format": 2, "id": "windows-fixture", "title": "Windows Fixture",
+        definition = {"format": 3, "id": "windows-fixture", "title": "Windows Fixture",
                       "recipe": {"name": ref["name"], "version": ref["version"]}, "components": [], "configuration": {},
                       "design": {"definitions": [], "instances": [], "connections": []}, "updatePolicy": {"security": "auto", "features": "manual", "preview": "hold"}}
         lock = resolve(requirements(definition), store / "catalogue.json", definition["id"], digest(canonical(definition)))

@@ -17,7 +17,7 @@ from unittest import mock
 import xml.etree.ElementTree as ET
 import zlib
 
-from aepm.diagram import generate as g
+from clod.diagram import generate as g
 
 
 ROOT = Path(g.__file__).resolve().parent
@@ -26,7 +26,7 @@ SENTINEL = "DISTINCTIVE_PRIVATE_VALUE_6b20"
 
 def port(identifier, direction, required=True, cardinality="one"):
     result = {"id": identifier, "name": "Shared label", "direction": direction,
-              "kind": "interface", "type": "ae/contract", "version": "1.0.0"}
+              "kind": "interface", "type": "com.clodhub/contract", "version": "1.0.0"}
     if direction == "input":
         result.update(required=required, cardinality=cardinality)
     return result
@@ -45,7 +45,7 @@ def design():
     return {"schemaVersion": 1, "id": "example", "title": "Example", "status": "proposed", "view": "application",
             "definitions": [
                 {"id": "producer", "name": "Shared label", "kind": "component", "status": "proposed",
-                 "package": "clodhub/example", "version": "0.1.0", "ports": [port("out", "output")], "settings": []},
+                 "package": "pkg:clod/com.clodhub/example", "version": "0.1.0", "ports": [port("out", "output")], "settings": []},
                 {"id": "consumer", "name": "Shared label", "kind": "application", "status": "example",
                  "revision": "0.1.0", "ports": [port("in", "input")], "settings": []}],
             "instances": [
@@ -82,7 +82,7 @@ class ValidationTests(unittest.TestCase):
                 self.assertIn(value["status"], ("proposed", "example"))
                 for definition in value["definitions"]:
                     if definition["kind"] == "component":
-                        self.assertTrue(definition["package"].startswith("clodhub/"))
+                        self.assertTrue(definition["package"].startswith("pkg:clod/com.clodhub/"))
 
     def test_matching_example_packages_have_identical_contracts(self):
         contracts = {}
@@ -163,7 +163,7 @@ class ValidationTests(unittest.TestCase):
             value["definitions"][0].update(updates)
             self.assert_invalid(value)
         value = design()
-        value["definitions"][1]["package"] = "clodhub/rules"
+        value["definitions"][1]["package"] = "pkg:clod/com.clodhub/rules"
         self.assert_invalid(value)
 
     def test_port_fields_and_identifiers(self):
@@ -197,7 +197,7 @@ class ValidationTests(unittest.TestCase):
         value = design()
         value["definitions"][1]["ports"][0] = port("in", "output")
         self.assert_invalid(value, "expected an input")
-        for key, bad in (("kind", "setting"), ("type", "ae/other"), ("version", "1.0.1")):
+        for key, bad in (("kind", "setting"), ("type", "com.clodhub/other"), ("version", "1.0.1")):
             value = design()
             value["definitions"][1]["ports"][0][key] = bad
             self.assert_invalid(value, "incompatible")
@@ -697,7 +697,7 @@ class RealGraphvizTests(unittest.TestCase):
                 g.png_dimensions(raster)
                 root = ET.fromstring(vector)
                 texts = " ".join(root.itertext())
-                self.assertIn("clodhub/realtime-rooms", texts)
+                self.assertIn("pkg:clod/com.clodhub/realtime-rooms", texts)
                 self.assertIn("Proposed definition", texts)
                 self.assertIn("Proposed version 0.1.0", texts)
                 self.assertIn("[secret reference]", texts)

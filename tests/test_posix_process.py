@@ -12,9 +12,9 @@ import time
 import unittest
 from unittest.mock import patch
 
-from aepm.model import AepmError
-from aepm.posix_process import ContainedProcess, ExitObserver
-from aepm.process import run
+from clod.model import ClodError
+from clod.posix_process import ContainedProcess, ExitObserver
+from clod.process import run
 
 
 @unittest.skipUnless(sys.platform == "darwin" or sys.platform.startswith("linux"), "Requires supported non-reaping Unix observation")
@@ -31,9 +31,9 @@ class OwnedGroupTests(unittest.TestCase):
                 self.assertIsNone(process.popen.returncode)
                 self.assertTrue(process.terminate_tree())
                 self.assertEqual(process.reap(), 7)
-                with patch("aepm.posix_process.os.killpg", side_effect=AssertionError("signal after reap")):
+                with patch("clod.posix_process.os.killpg", side_effect=AssertionError("signal after reap")):
                     self.assertTrue(process.terminate_tree())
-                    with self.assertRaises(AepmError):
+                    with self.assertRaises(ClodError):
                         process.signal_group()
         finally:
             if not process.signaling_finished:
@@ -46,12 +46,12 @@ class OwnedGroupTests(unittest.TestCase):
         process = ContainedProcess([sys.executable, "-c", "pass"], tempfile.gettempdir(), {"PATH": os.defpath})
         os.waitpid(process.pid, 0)
         try:
-            with patch("aepm.posix_process.os.killpg", side_effect=AssertionError("signal after ownership loss")):
+            with patch("clod.posix_process.os.killpg", side_effect=AssertionError("signal after ownership loss")):
                 self.assertFalse(process.terminate_tree())
                 self.assertTrue(process.ownership_lost)
-                with self.assertRaises(AepmError):
+                with self.assertRaises(ClodError):
                     process.signal_group()
-                with self.assertRaises(AepmError):
+                with self.assertRaises(ClodError):
                     process.reap()
         finally:
             process.close()
@@ -60,7 +60,7 @@ class OwnedGroupTests(unittest.TestCase):
         original = signal.getsignal(signal.SIGCHLD)
         try:
             signal.signal(signal.SIGCHLD, signal.SIG_IGN)
-            with patch("aepm.posix_process.subprocess.Popen", side_effect=AssertionError("command launched")), self.assertRaises(AepmError):
+            with patch("clod.posix_process.subprocess.Popen", side_effect=AssertionError("command launched")), self.assertRaises(ClodError):
                 ContainedProcess([sys.executable, "-c", "pass"], tempfile.gettempdir(), {})
         finally:
             signal.signal(signal.SIGCHLD, original)
@@ -74,7 +74,7 @@ class OwnedGroupTests(unittest.TestCase):
         try:
             self.assertEqual(observer.sigaction(signal.SIGCHLD, ctypes.byref(altered), None), 0)
             self.assertEqual(signal.getsignal(signal.SIGCHLD), signal.SIG_DFL)
-            with patch("aepm.posix_process.subprocess.Popen", side_effect=AssertionError("command launched")), self.assertRaises(AepmError):
+            with patch("clod.posix_process.subprocess.Popen", side_effect=AssertionError("command launched")), self.assertRaises(ClodError):
                 ContainedProcess([sys.executable, "-c", "pass"], tempfile.gettempdir(), {})
         finally:
             self.assertEqual(observer.sigaction(signal.SIGCHLD, ctypes.byref(original), None), 0)
@@ -92,7 +92,7 @@ class OwnedGroupTests(unittest.TestCase):
             sentinel.wait(timeout=5)
 
     def test_cancellation_cleans_group_before_propagating(self):
-        from aepm import process as module
+        from clod import process as module
         created = []
         original = ContainedProcess.__init__
 

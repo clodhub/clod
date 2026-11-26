@@ -16,9 +16,9 @@ import unittest
 from unittest.mock import Mock, patch
 from types import SimpleNamespace
 
-from aepm.model import AepmError
-from aepm.private_process import AuditToken, CaptureRace, DarwinBackend, LinuxBackend, Identity, PrivateScope, enroll_root
-from aepm.process import run
+from clod.model import ClodError
+from clod.private_process import AuditToken, CaptureRace, DarwinBackend, LinuxBackend, Identity, PrivateScope, enroll_root
+from clod.process import run
 
 if os.name == "nt":
     raise unittest.SkipTest("POSIX private-process scope")
@@ -36,7 +36,7 @@ class FakeBackend:
     def capture(self, pid, *, paths=True, allow_missing_executable=False):
         record = deepcopy(self.records.get(pid))
         if record and paths and (record.executable_missing or record.paths_unreadable) and not allow_missing_executable:
-            raise AepmError("cleanup-failed", "private-process-path")
+            raise ClodError("cleanup-failed", "private-process-path")
         return record
 
     def refresh(self, record):
@@ -45,7 +45,7 @@ class FakeBackend:
 
     def terminate(self, record, number):
         if self.denied:
-            raise AepmError("cleanup-failed", "simulated-signal-denial")
+            raise ClodError("cleanup-failed", "simulated-signal-denial")
         self.signals.append((record.key, number))
         self.records[record.pid].status = 5
 
@@ -60,20 +60,20 @@ class SimulatedPrivateScopeTests(unittest.TestCase):
         self.root = Path(self.temporary.name).resolve()
 
     def scope(self, backend, root=None):
-        with patch("aepm.private_process.DarwinBackend", return_value=backend), patch("aepm.private_process.LinuxBackend", return_value=backend):
+        with patch("clod.private_process.DarwinBackend", return_value=backend), patch("clod.private_process.LinuxBackend", return_value=backend):
             scope = PrivateScope(root or self.root)
         self.addCleanup(scope.close)
         return scope
 
     def test_baseline_and_later_baseline_entry_are_conflicts(self):
         record = Identity(100, 100, os.geteuid(), 1, 100, 2, "/outside/program", str(self.root))
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             self.scope(FakeBackend({100: record}))
         record.cwd = "/outside"
         backend = FakeBackend({100: record})
         scope = self.scope(backend)
         backend.records[100].cwd = str(self.root)
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             scope.bind(200)
         self.assertFalse(backend.signals)
 
@@ -95,9 +95,9 @@ class SimulatedPrivateScopeTests(unittest.TestCase):
                 backend.records[200] = Identity(200, 200, os.geteuid(), 1, 999, 2, str(root / "private-executable"), "/outside")
                 scope.bind(300)
                 if fault == "truncated":
-                    backend.pids = Mock(side_effect=AepmError("cleanup-failed", "truncated"))
+                    backend.pids = Mock(side_effect=ClodError("cleanup-failed", "truncated"))
                 elif fault == "unreadable":
-                    backend.capture = Mock(side_effect=AepmError("cleanup-failed", "unreadable"))
+                    backend.capture = Mock(side_effect=ClodError("cleanup-failed", "unreadable"))
                 else:
                     backend.denied = True
                 self.assertFalse(scope.finish(time.monotonic() + .15))
@@ -112,7 +112,7 @@ class SimulatedPrivateScopeTests(unittest.TestCase):
         self.assertTrue(first.finish(time.monotonic() + .2))
         first.close()
         backend.records[100].generation = 8
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             self.scope(backend)
         self.assertFalse(backend.signals)
 
@@ -124,26 +124,26 @@ class SimulatedPrivateScopeTests(unittest.TestCase):
         self.assertTrue(first.finish(time.monotonic() + .2))
         first.close()
         backend.records[200] = Identity(200, 200, os.geteuid(), 1, 999, 2, None, "/outside", generation=1, executable_missing=True)
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             self.scope(backend)
         self.assertFalse(backend.signals)
 
     def test_external_unknown_birth_and_root_replacement_fail(self):
         backend = FakeBackend({100: Identity(100, 100, os.geteuid(), 1, 100, 2, None, "/outside", executable_missing=True)})
-        with self.assertRaisesRegex(AepmError, "baseline-age"):
+        with self.assertRaisesRegex(ClodError, "baseline-age"):
             self.scope(backend)
         backend.records.clear()
         scope = self.scope(backend)
         scope.bind(300)
         self.root.rmdir()
         self.root.mkdir(mode=0o700)
-        with self.assertRaisesRegex(AepmError, "private-process-root"):
+        with self.assertRaisesRegex(ClodError, "private-process-root"):
             scope.scan(force=True)
         self.assertFalse(backend.signals)
 
     def test_baseline_cap_does_not_discard_live_entries(self):
         entries = {(index, index): SimpleNamespace(active=1) for index in range(512)}
-        with patch("aepm.private_process._BASELINES", entries), self.assertRaisesRegex(AepmError, "baseline-limit"):
+        with patch("clod.private_process._BASELINES", entries), self.assertRaisesRegex(ClodError, "baseline-limit"):
             enroll_root(self.root, before_work=True, backend=FakeBackend({}))
 
     def test_simulated_linux_missing_path_requires_descriptor_exit(self):
@@ -152,11 +152,11 @@ class SimulatedPrivateScopeTests(unittest.TestCase):
                 backend = LinuxBackend.__new__(LinuxBackend)
                 backend.exited = Mock(return_value=exited)
                 backend.open_descriptor = Mock(return_value=123)
-                with patch.object(Path, "read_text", side_effect=error), patch("aepm.private_process.os.close") as close:
+                with patch.object(Path, "read_text", side_effect=error), patch("clod.private_process.os.close") as close:
                     if exited:
                         self.assertIsNone(backend.capture(456))
                     else:
-                        with self.assertRaisesRegex(AepmError, "private-process-discovery") as raised:
+                        with self.assertRaisesRegex(ClodError, "private-process-discovery") as raised:
                             backend.capture(456)
                         self.assertIsInstance(raised.exception, CaptureRace)
                     backend.exited.assert_called_once_with(123)
@@ -174,11 +174,11 @@ class SimulatedPrivateScopeTests(unittest.TestCase):
         def read_text(path, *args, **kwargs):
             return texts[path.name]
 
-        with patch.object(Path, "read_text", read_text), patch("aepm.private_process.os.readlink", side_effect=readlink), \
-                patch("aepm.private_process.os.close") as close:
+        with patch.object(Path, "read_text", read_text), patch("clod.private_process.os.readlink", side_effect=readlink), \
+                patch("clod.private_process.os.close") as close:
             try:
                 return backend.capture(456, allow_missing_executable=allow), close
-            except AepmError as error:
+            except ClodError as error:
                 return error, close
 
     def test_simulated_linux_unreadable_links_of_this_user(self):
@@ -228,7 +228,7 @@ class SimulatedPrivateScopeTests(unittest.TestCase):
         scope.close()
         self.assertFalse(backend.signals)
         backend.records[100].generation = 8
-        with self.assertRaisesRegex(AepmError, "private-process-baseline-generation"):
+        with self.assertRaisesRegex(ClodError, "private-process-baseline-generation"):
             self.scope(backend)
         self.assertFalse(backend.signals)
 
@@ -238,24 +238,24 @@ class SimulatedPrivateScopeTests(unittest.TestCase):
         scope = self.scope(backend)
         scope.bind(300)
         backend.records[200] = Identity(200, 200, os.geteuid(), 1, 300, 2, None, None, generation=1, paths_unreadable=True)
-        with self.assertRaisesRegex(AepmError, "private-process-path"):
+        with self.assertRaisesRegex(ClodError, "private-process-path"):
             scope.scan(force=True)
         self.assertNotIn(200, scope.owned)
         self.assertFalse(backend.signals)
 
     def test_unreadable_process_needs_a_fresh_root_or_known_age(self):
         backend = FakeBackend({100: Identity(100, 100, os.geteuid(), 1, 100, 2, None, None, paths_unreadable=True)})
-        with self.assertRaisesRegex(AepmError, "baseline-age"):
+        with self.assertRaisesRegex(ClodError, "baseline-age"):
             enroll_root(self.root, backend=backend)
         (self.root / "work").mkdir()
-        with self.assertRaisesRegex(AepmError, "private-process-enrollment"):
+        with self.assertRaisesRegex(ClodError, "private-process-enrollment"):
             enroll_root(self.root, before_work=True, backend=backend)
 
 
 @unittest.skipUnless(sys.platform == "darwin", "Actual macOS identity tests; Linux acceptance is separate")
 class ActualPrivateScopeTests(unittest.TestCase):
     def environment(self, root):
-        return {"PATH": os.defpath, "AEPM_PRIVATE_ROOT": str(root), "HOME": str(root), "TMPDIR": str(root)}
+        return {"PATH": os.defpath, "CLOD_PRIVATE_ROOT": str(root), "HOME": str(root), "TMPDIR": str(root)}
 
     def test_detached_private_directory_child_stops_on_timeout(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -373,7 +373,7 @@ class ActualPrivateScopeTests(unittest.TestCase):
                      "Actual Linux process-descriptor host unavailable")
 class ActualLinuxDescriptorTests(unittest.TestCase):
     def test_stale_descriptor_never_targets_another_process(self):
-        from aepm.private_process import LinuxBackend
+        from clod.private_process import LinuxBackend
         backend = LinuxBackend()
         child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(10)"], start_new_session=True)
         identity = backend.capture(child.pid, paths=False)

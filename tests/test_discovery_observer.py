@@ -6,8 +6,8 @@ import errno
 import unittest
 from unittest.mock import Mock, patch
 
-from aepm.model import canonical
-from aepm.private_process import AuditToken, CombinedInfo, DarwinBackend
+from clod.model import canonical
+from clod.private_process import AuditToken, CombinedInfo, DarwinBackend
 from tests.discovery_observer import DiscoveryObserver
 
 import os

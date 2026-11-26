@@ -12,9 +12,9 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from aepm.model import AepmError, canonical, digest
-from aepm.private_process import DarwinBackend
-from aepm.supervision import Recorder
+from clod.model import ClodError, canonical, digest
+from clod.private_process import DarwinBackend
+from clod.supervision import Recorder
 from tests.discovery_observer import DiscoveryObserver
 from tests import test_discovery_observer as fake
 from tests import run_android_discovery_fixture as entry
@@ -165,7 +165,7 @@ class AndroidObserverTests(GuardedTests):
 
     def test_detach_waits_for_return_and_failure_keeps_first_branch(self):
         observer, contextual, _, _, _, _ = self.observer(modes=("path-race",))
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             contextual.run("argument", diagnostics=Recorder())
         first = observer.document()["backends"][0]["detail"]["firstFailure"]
         self.assertEqual(first["location"], "private-process-discovery")
@@ -211,7 +211,7 @@ class AndroidInventoryTests(GuardedTests):
         self.assertEqual(binding["indexDigest"], digest(index))
         self.assertEqual(before, {path: path.read_bytes() for path in check.rglob("*") if path.is_file()})
         diagnostic.write_bytes(b"changed")
-        with self.assertRaises(AepmError):
+        with self.assertRaises(ClodError):
             entry.harness_evidence(check)
 
     def inventory(self):
@@ -292,11 +292,11 @@ class AndroidInventoryTests(GuardedTests):
         context.write_text(json.dumps({"resources": [{"id": "fixture"}]}))
         source_snapshot = []
         with patch("tests.run_android_component_fixture.inputs") as inputs, \
-                patch("aepm.io.snapshot", return_value=source_snapshot), \
+                patch("clod.io.snapshot", return_value=source_snapshot), \
                 patch.object(entry, "SOURCE_DIGEST", digest(canonical(source_snapshot))), \
-                patch("aepm.environment.validate_resource", side_effect=AepmError("resource-changed", "fixture")), \
+                patch("clod.environment.validate_resource", side_effect=ClodError("resource-changed", "fixture")), \
                 patch("tests.run_android_component_fixture.check", side_effect=AssertionError("workload forbidden")) as check:
-            with self.assertRaises(AepmError):
+            with self.assertRaises(ClodError):
                 entry.workload_inputs(self.root, self.root / "absent-check")
             inputs.assert_called_once()
             check.assert_not_called()

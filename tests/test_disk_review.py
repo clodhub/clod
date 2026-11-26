@@ -12,7 +12,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from aepm.model import AepmError
+from clod.model import ClodError
 from tests.core.test_core import PYTHON, fixture
 from tests.test_disk_safety import LedgerAndCleanTests, StateTest
 
@@ -24,7 +24,7 @@ class CleanProtectionTests(StateTest):
     dead_root = LedgerAndCleanTests.dead_root
 
     def survey(self):
-        from aepm.clean import survey
+        from clod.clean import survey
         value = survey()
         return [item["path"] for item in value["candidates"]], {item["path"]: item["reason"] for item in value["protected"]}, value
 
@@ -34,15 +34,15 @@ class CleanProtectionTests(StateTest):
         real.mkdir()
         linked = self.root / "linked-temporary"
         linked.symlink_to(real)
-        from aepm.ledger import record
+        from clod.ledger import record
         with patch("tempfile.tempdir", str(linked)):
-            ledgered = linked / "aepm-verification-ledgered"
+            ledgered = linked / "clod-verification-ledgered"
             ledgered.mkdir()
             record(ledgered, "check", purpose="fixture")
-            (linked / "aepm-verification-unledgered").mkdir()
+            (linked / "clod-verification-unledgered").mkdir()
             _, _, value = self.survey()
         unknown = [item["path"] for item in value["unknown"]]
-        self.assertEqual(unknown, [str(real / "aepm-verification-unledgered")])
+        self.assertEqual(unknown, [str(real / "clod-verification-unledgered")])
 
     @POSIX
     def test_killed_owner_root_with_an_emulator_profile_is_protected(self):
@@ -57,10 +57,10 @@ class CleanProtectionTests(StateTest):
     @POSIX
     def test_a_profile_root_is_never_removed_even_when_its_devices_are_confirmed_gone(self):
         root = self.dead_root("check-gone-devices", retained="device-ownership",
-                              devices=[{"kind": "apple-device", "requestedId": "aepm-a", "resourceId": "0000-gone"}])
+                              devices=[{"kind": "apple-device", "requestedId": "clod-a", "resourceId": "0000-gone"}])
         (root / "protocol/profiles/apple").mkdir(parents=True)
         (root / "protocol/profiles/apple/device.plist").write_text("profile")
-        with patch("aepm.clean._devices_gone", return_value=True):
+        with patch("clod.clean._devices_gone", return_value=True):
             candidates, protected, _ = self.survey()
         self.assertNotIn(str(root), candidates)
         self.assertEqual(protected[str(root)], "device-profile-present")
@@ -69,7 +69,7 @@ class CleanProtectionTests(StateTest):
     def test_killed_owner_root_with_device_intent_records_is_protected(self):
         root = self.dead_root("check-intent", retained="cleanup-failed")
         (root / "protocol/ownership").mkdir(parents=True)
-        (root / "protocol/ownership/intent-1.json").write_text(json.dumps({"kind": "apple-device", "requestedId": "aepm-x"}))
+        (root / "protocol/ownership/intent-1.json").write_text(json.dumps({"kind": "apple-device", "requestedId": "clod-x"}))
         candidates, protected, _ = self.survey()
         self.assertNotIn(str(root), candidates)
         self.assertEqual(protected[str(root)], "devices-not-confirmed-gone")
@@ -95,8 +95,8 @@ class CleanProtectionTests(StateTest):
         candidates, protected, _ = self.survey()
         self.assertNotIn(str(root), candidates)
         self.assertEqual(protected[str(root)], "owner-alive")
-        from aepm.space import _device, reserved_by_others
-        from aepm.state import folder, write_record
+        from clod.space import _device, reserved_by_others
+        from clod.state import folder, write_record
         write_record(folder("reservations") / "unknown.json", {"format": 1, "pid": 999999, "processStart": None, "runId": "x",
                                                                "device": _device(self.root), "bytes": 12345, "path": str(self.root),
                                                                "purpose": "fixture"})
@@ -135,7 +135,7 @@ class OpenFileTests(StateTest):
 
     @POSIX
     def test_a_file_held_open_from_outside_keeps_the_root_protected_at_listing_and_removal(self):
-        from aepm.clean import clean, survey
+        from clod.clean import clean, survey
         root = self.dead_root("check-open")
         holder = self.holder(root / "data")
         listed = survey()
@@ -144,7 +144,7 @@ class OpenFileTests(StateTest):
         holder.kill()
         holder.wait()
         clean()
-        from aepm import clean as module
+        from clod import clean as module
         real = module.open_paths
         calls = []
 
@@ -168,7 +168,7 @@ class OpenFileTests(StateTest):
 
     @POSIX
     def test_an_inspection_failure_protects_every_candidate(self):
-        from aepm import clean as module
+        from clod import clean as module
         first, second = self.dead_root("check-first"), self.dead_root("check-second")
         with patch.object(module, "open_paths", return_value=None):
             listed = module.survey()
@@ -183,7 +183,7 @@ class OpenFileTests(StateTest):
 
     def test_open_file_inspection_fails_closed(self):
         from types import SimpleNamespace
-        from aepm import clean as module
+        from clod import clean as module
         with patch.object(module, "PLATFORM", "darwin"), \
                 patch.object(module.subprocess, "run", return_value=SimpleNamespace(returncode=1, stdout=b"p1\nn/x\n")):
             self.assertIsNone(module.open_paths())
@@ -196,7 +196,7 @@ class OpenFileTests(StateTest):
 
     @POSIX
     def test_windows_lists_but_never_removes(self):
-        from aepm import clean as module
+        from clod import clean as module
         root = self.dead_root("check-windows")
         with patch.object(module, "PLATFORM", "win32"):
             code, value = self.command("clean")
@@ -211,7 +211,7 @@ class OpenFileTests(StateTest):
 class FullVolumeAndCleanupTests(StateTest):
     def setUp(self):
         super().setUp()
-        patcher = patch.dict(os.environ, {"AEPM_FREE_SPACE_MARGIN": "0"})
+        patcher = patch.dict(os.environ, {"CLOD_FREE_SPACE_MARGIN": "0"})
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -221,7 +221,7 @@ class FullVolumeAndCleanupTests(StateTest):
                 "timeoutSeconds": 30, "expectedExit": 0, "requirements": [], **changes}
 
     def retained(self):
-        from aepm.ledger import entries
+        from clod.ledger import entries
         roots = [Path(entry["root"]) for entry in entries() if entry["kind"] == "check" and entry.get("retained") == "cleanup-failed"]
         for root in roots:
             self.addCleanup(lambda root=root: root.exists() and ([os.chmod(d, 0o700) for d, _, _ in os.walk(root)], shutil.rmtree(root, ignore_errors=True)))
@@ -229,8 +229,8 @@ class FullVolumeAndCleanupTests(StateTest):
 
     @POSIX
     def test_failed_cleanup_then_a_full_volume_keeps_the_root_and_names_cleanup_failed(self):
-        from aepm import verification
-        from aepm.trust import validate_suite_resources
+        from clod import verification
+        from clod.trust import validate_suite_resources
         source = self.root / "package"
         source.mkdir()
         (source / "data").write_bytes(b"d" * 1000)
@@ -259,8 +259,8 @@ class FullVolumeAndCleanupTests(StateTest):
     @POSIX
     def test_full_volume_then_a_failed_cleanup_hook_gives_a_result_that_validates(self):
         from types import SimpleNamespace
-        from aepm import contextual
-        from aepm.trust import validate_suite_resources
+        from clod import contextual
+        from clod.trust import validate_suite_resources
         source = self.root / "package"
         source.mkdir()
         suite = self.suite(id="room", scope="platform", argv=["fixture"], tools={}, execution={
@@ -280,7 +280,7 @@ class FullVolumeAndCleanupTests(StateTest):
             raise OSError(errno.ENOSPC, "No space left on device", str(self.root / "full"))
 
         with patch.object(contextual, "tool_environment", side_effect=lambda home, *a, **k: {"PATH": "/usr/bin",
-                          "AEPM_PRIVATE_ROOT": str(home.parent)}), \
+                          "CLOD_PRIVATE_ROOT": str(home.parent)}), \
                 patch.object(contextual, "tool_versions", return_value={}), \
                 patch.object(contextual, "prerequisites", return_value=[]), \
                 patch.object(contextual, "resolve_command", side_effect=lambda argv, *a, **k: argv), \
@@ -295,11 +295,11 @@ class FullVolumeAndCleanupTests(StateTest):
 
 class AdmissionTests(StateTest):
     def test_a_check_refused_at_admission_does_not_stop_a_smaller_later_check(self):
-        from aepm.bundle import pack
-        from aepm.io import load, write
-        from aepm.test_identities import generate
-        from aepm.trust import publish_release
-        from aepm import verification
+        from clod.bundle import pack
+        from clod.io import load, write
+        from clod.test_identities import generate
+        from clod.trust import publish_release
+        from clod import verification
         source = self.root / "source"
         manifest = fixture(source)
         small = dict(manifest["verification"][0], id="z-small")
@@ -316,7 +316,7 @@ class AdmissionTests(StateTest):
         def sized(suite, *args):
             return 10 ** 15 if suite["id"] == "a-large" else original(suite, *args)
 
-        with patch.dict(os.environ, {"AEPM_FREE_SPACE_MARGIN": "0"}), patch.object(verification, "check_bytes", side_effect=sized):
+        with patch.dict(os.environ, {"CLOD_FREE_SPACE_MARGIN": "0"}), patch.object(verification, "check_bytes", side_effect=sized):
             report = verification.review_package(ref, store, policy, True)
         results = {item["id"]: item for item in report["suites"]}
         self.assertEqual((results["a-large"]["status"], results["a-large"]["reason"]), ("blocked", "insufficient-space"))
