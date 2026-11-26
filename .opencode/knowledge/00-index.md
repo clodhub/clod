@@ -1,6 +1,6 @@
-# aepm ownership
+# clod ownership
 
-Repository: https://github.com/clodhub/aepm.git, branch `main`. Owner: aepm-store-dev.
+Repository: https://github.com/clodhub/clod.git, branch `main`. Owner: clodhub-dev.
 Read `workflow.md` before editing or running checks.
 
 Code: the `aepm/` package (command entrypoint `aepm/__main__.py`, bundled diagram renderer `aepm/diagram/`) and `tests/`. `README.md` has the commands and trusted execution; `FOUNDATIONS.md` the package metadata.

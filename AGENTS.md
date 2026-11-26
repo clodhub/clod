@@ -1,4 +1,4 @@
-# aepm
+# clod
 
-Repository: `clodhub/aepm`. Read `.opencode/knowledge/00-index.md` and `workflow.md` before work.
-Owner: aepm-store-dev.
+Repository: `clodhub/clod`. Read `.opencode/knowledge/00-index.md` and `workflow.md` before work.
+Owner: clodhub-dev.
